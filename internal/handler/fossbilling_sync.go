@@ -80,7 +80,7 @@ func (h *FOSSBillingSyncHandler) SyncFromFOSSBilling(c *gin.Context) {
 
 	// 获取请求参数
 	var req struct {
-		FOSSBillingURL    string `json:"fossbilling_url"`    // FOSSBilling 服务器地址（可选，使用配置默认值）
+		FOSSBillingURL    string `json:"fossbilling_url"`                        // FOSSBilling 服务器地址（可选，使用配置默认值）
 		FOSSBillingAPIKey string `json:"fossbilling_api_key" binding:"required"` // FOSSBilling API Key（必填）
 	}
 

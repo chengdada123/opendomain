@@ -415,73 +415,127 @@ func (h *PaymentHandler) processSuccessfulPayment(
 			return err
 		}
 
-		// 计算域名过期时间
-		var expiresAt time.Time
-		if order.IsLifetime {
-			// 永久域名设置为100年后
-			expiresAt = now.AddDate(100, 0, 0)
+		// 检查是否为续费订单（如果 order.DomainID 已存在，表示续费）
+		if order.DomainID != nil && *order.DomainID > 0 {
+			// 续费：更新现有域名的过期时间
+			var domain models.Domain
+			if err := tx.First(&domain, *order.DomainID).Error; err != nil {
+				return fmt.Errorf("failed to find domain for renewal: %w", err)
+			}
+
+			// 计算新的过期时间（从当前过期时间延长）
+			var newExpiresAt time.Time
+			if order.IsLifetime {
+				// 永久域名设置为100年后
+				newExpiresAt = domain.ExpiresAt.AddDate(100, 0, 0)
+			} else {
+				newExpiresAt = domain.ExpiresAt.AddDate(order.Years, 0, 0)
+			}
+
+			// 更新域名过期时间
+			if err := tx.Model(&domain).Update("expires_at", newExpiresAt).Error; err != nil {
+				return fmt.Errorf("failed to update domain expiry: %w", err)
+			}
+
+			// 更新订单状态
+			order.Status = "paid"
+			order.PaidAt = &now
+
+			if err := tx.Save(order).Error; err != nil {
+				return err
+			}
+
+			// 记录优惠券使用（如果有）
+			if order.CouponID != nil {
+				usage := &models.CouponUsage{
+					CouponID: *order.CouponID,
+					UserID:   order.UserID,
+					DomainID: order.DomainID,
+				}
+				if err := tx.Create(usage).Error; err != nil {
+					return err
+				}
+
+				// 更新优惠券使用次数
+				if err := tx.Model(&models.Coupon{}).
+					Where("id = ?", order.CouponID).
+					UpdateColumn("used_count", gorm.Expr("used_count + ?", 1)).Error; err != nil {
+					return err
+				}
+			}
+
+			fmt.Printf("Domain %s renewed successfully, new expiry: %s\n", domain.FullDomain, newExpiresAt)
 		} else {
-			expiresAt = now.AddDate(order.Years, 0, 0)
-		}
-
-		// 获取根域名的 NS 设置
-		var rd models.RootDomain
-		if err := tx.First(&rd, order.RootDomainID).Error; err != nil {
-			return err
-		}
-
-		// 创建域名
-		domain := &models.Domain{
-			UserID:                order.UserID,
-			RootDomainID:          order.RootDomainID,
-			Subdomain:             order.Subdomain,
-			FullDomain:            order.FullDomain,
-			Status:                "active",
-			RegisteredAt:          now,
-			ExpiresAt:             expiresAt,
-			AutoRenew:             false,
-			Nameservers:           rd.Nameservers,
-			UseDefaultNameservers: rd.UseDefaultNameservers,
-			DNSSynced:             false,
-		}
-
-		if err := tx.Create(domain).Error; err != nil {
-			return err
-		}
-
-		// 更新订单
-		order.Status = "paid"
-		order.PaidAt = &now
-		order.DomainID = &domain.ID
-
-		if err := tx.Save(order).Error; err != nil {
-			return err
-		}
-
-		// 记录优惠券使用
-		if order.CouponID != nil {
-			usage := &models.CouponUsage{
-				CouponID: *order.CouponID,
-				UserID:   order.UserID,
-				DomainID: &domain.ID,
+			// 新注册：创建新域名
+			var expiresAt time.Time
+			if order.IsLifetime {
+				// 永久域名设置为100年后
+				expiresAt = now.AddDate(100, 0, 0)
+			} else {
+				expiresAt = now.AddDate(order.Years, 0, 0)
 			}
-			if err := tx.Create(usage).Error; err != nil {
+
+			// 获取根域名的 NS 设置
+			var rd models.RootDomain
+			if err := tx.First(&rd, order.RootDomainID).Error; err != nil {
 				return err
 			}
 
-			// 更新优惠券使用次数
-			if err := tx.Model(&models.Coupon{}).
-				Where("id = ?", order.CouponID).
-				UpdateColumn("used_count", gorm.Expr("used_count + ?", 1)).Error; err != nil {
+			// 创建域名
+			domain := &models.Domain{
+				UserID:                order.UserID,
+				RootDomainID:          order.RootDomainID,
+				Subdomain:             order.Subdomain,
+				FullDomain:            order.FullDomain,
+				Status:                "active",
+				RegisteredAt:          now,
+				ExpiresAt:             expiresAt,
+				AutoRenew:             false,
+				Nameservers:           rd.Nameservers,
+				UseDefaultNameservers: rd.UseDefaultNameservers,
+				DNSSynced:             false,
+			}
+
+			if err := tx.Create(domain).Error; err != nil {
 				return err
 			}
-		}
 
-		// 更新根域名注册数量
-		if err := tx.Model(&models.RootDomain{}).
-			Where("id = ?", order.RootDomainID).
-			UpdateColumn("registration_count", gorm.Expr("registration_count + ?", 1)).Error; err != nil {
-			return err
+			// 更新订单
+			order.Status = "paid"
+			order.PaidAt = &now
+			order.DomainID = &domain.ID
+
+			if err := tx.Save(order).Error; err != nil {
+				return err
+			}
+
+			// 记录优惠券使用（新注册）
+			if order.CouponID != nil {
+				usage := &models.CouponUsage{
+					CouponID: *order.CouponID,
+					UserID:   order.UserID,
+					DomainID: &domain.ID,
+				}
+				if err := tx.Create(usage).Error; err != nil {
+					return err
+				}
+
+				// 更新优惠券使用次数
+				if err := tx.Model(&models.Coupon{}).
+					Where("id = ?", order.CouponID).
+					UpdateColumn("used_count", gorm.Expr("used_count + ?", 1)).Error; err != nil {
+					return err
+				}
+			}
+
+			// 更新根域名注册数量（仅新注册）
+			if err := tx.Model(&models.RootDomain{}).
+				Where("id = ?", order.RootDomainID).
+				UpdateColumn("registration_count", gorm.Expr("registration_count + ?", 1)).Error; err != nil {
+				return err
+			}
+
+			fmt.Printf("Domain %s created successfully, expiry: %s\n", domain.FullDomain, expiresAt)
 		}
 
 		return nil
@@ -700,7 +754,60 @@ func (h *PaymentHandler) getFailureRedirectURL(order *models.Order) string {
 func (h *PaymentHandler) createDomainFromOrder(tx *gorm.DB, order *models.Order) error {
 	now := timeutil.Now()
 
-	// 计算域名过期时间
+	// 检查是否为续费订单（如果 order.DomainID 已存在，表示续费）
+	if order.DomainID != nil && *order.DomainID > 0 {
+		// 续费：更新现有域名的过期时间
+		var domain models.Domain
+		if err := tx.First(&domain, *order.DomainID).Error; err != nil {
+			return fmt.Errorf("failed to find domain for renewal: %w", err)
+		}
+
+		// 计算新的过期时间（从当前过期时间延长）
+		var newExpiresAt time.Time
+		if order.IsLifetime {
+			// 永久域名设置为100年后
+			newExpiresAt = domain.ExpiresAt.AddDate(100, 0, 0)
+		} else {
+			newExpiresAt = domain.ExpiresAt.AddDate(order.Years, 0, 0)
+		}
+
+		// 更新域名过期时间
+		if err := tx.Model(&domain).Update("expires_at", newExpiresAt).Error; err != nil {
+			return fmt.Errorf("failed to update domain expiry: %w", err)
+		}
+
+		// 更新订单状态
+		order.Status = "paid"
+		order.PaidAt = &now
+
+		if err := tx.Save(order).Error; err != nil {
+			return err
+		}
+
+		// 记录优惠券使用（如果有）
+		if order.CouponID != nil {
+			usage := &models.CouponUsage{
+				CouponID: *order.CouponID,
+				UserID:   order.UserID,
+				DomainID: order.DomainID,
+			}
+			if err := tx.Create(usage).Error; err != nil {
+				return err
+			}
+
+			// 更新优惠券使用次数
+			if err := tx.Model(&models.Coupon{}).
+				Where("id = ?", order.CouponID).
+				UpdateColumn("used_count", gorm.Expr("used_count + ?", 1)).Error; err != nil {
+				return err
+			}
+		}
+
+		fmt.Printf("Domain %s renewed successfully (free), new expiry: %s\n", domain.FullDomain, newExpiresAt)
+		return nil
+	}
+
+	// 新注册：创建新域名
 	var expiresAt time.Time
 	if order.IsLifetime {
 		// 永久域名设置为100年后

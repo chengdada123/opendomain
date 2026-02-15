@@ -963,12 +963,12 @@ func (h *DomainHandler) ListAllDomains(c *gin.Context) {
 	var domains []models.Domain
 	offset := (page - 1) * pageSize
 	domainQuery := h.db.Preload("RootDomain").Preload("User")
-	
+
 	// 状态筛选
 	if status != "" && (status == "active" || status == "expired" || status == "suspended") {
 		domainQuery = domainQuery.Where("status = ?", status)
 	}
-	
+
 	if search != "" {
 		domainQuery = domainQuery.Joins("LEFT JOIN users ON users.id = domains.user_id").
 			Where("domains.full_domain LIKE ? OR domains.subdomain LIKE ? OR users.username LIKE ? OR users.email LIKE ?",

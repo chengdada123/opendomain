@@ -492,7 +492,7 @@ func (h *OAuthHandler) NodelocCallback(c *gin.Context) {
 type nodelocUser struct {
 	Sub               string `json:"sub"`
 	Name              string `json:"name"`
-	PreferredUsername  string `json:"preferred_username"`
+	PreferredUsername string `json:"preferred_username"`
 	Email             string `json:"email"`
 	Picture           string `json:"picture"`
 	TrustLevel        int    `json:"trust_level"`
