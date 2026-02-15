@@ -42,13 +42,14 @@ func (h *DomainScanHandler) ListDomainHealth(c *gin.Context) {
 		pageSizeInt = 100
 	}
 
-	// 构建查询
-	query := h.db.Model(&models.DomainScanSummary{})
+	// 构建查询 - 排除已删除的域名
+	query := h.db.Model(&models.DomainScanSummary{}).
+		Joins("JOIN domains ON domains.id = domain_scan_summaries.domain_id").
+		Where("domains.deleted_at IS NULL AND domains.status != ?", "deleted")
 
 	// 如果有搜索关键词，通过域名名称搜索
 	if search != "" {
-		query = query.Joins("JOIN domains ON domains.id = domain_scan_summaries.domain_id").
-			Where("domains.full_domain LIKE ?", "%"+search+"%")
+		query = query.Where("domains.full_domain LIKE ?", "%"+search+"%")
 	}
 
 	// 获取总数
@@ -59,10 +60,12 @@ func (h *DomainScanHandler) ListDomainHealth(c *gin.Context) {
 	}
 
 	// 重新构建查询用于分页（因为 Count 可能会修改查询状态）
-	query = h.db.Model(&models.DomainScanSummary{}).Preload("Domain")
+	query = h.db.Model(&models.DomainScanSummary{}).
+		Joins("JOIN domains ON domains.id = domain_scan_summaries.domain_id").
+		Where("domains.deleted_at IS NULL AND domains.status != ?", "deleted").
+		Preload("Domain")
 	if search != "" {
-		query = query.Joins("JOIN domains ON domains.id = domain_scan_summaries.domain_id").
-			Where("domains.full_domain LIKE ?", "%"+search+"%")
+		query = query.Where("domains.full_domain LIKE ?", "%"+search+"%")
 	}
 
 	// 分页查询
@@ -99,6 +102,13 @@ func (h *DomainScanHandler) ListDomainHealth(c *gin.Context) {
 func (h *DomainScanHandler) GetDomainHealth(c *gin.Context) {
 	domainID := c.Param("domainId")
 
+	// 检查域名是否存在且未删除
+	var domain models.Domain
+	if err := h.db.Where("id = ? AND deleted_at IS NULL AND status != ?", domainID, "deleted").First(&domain).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Domain not found or has been deleted"})
+		return
+	}
+
 	var summary models.DomainScanSummary
 	if err := h.db.Preload("Domain").Where("domain_id = ?", domainID).First(&summary).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Domain health not found"})
@@ -111,6 +121,13 @@ func (h *DomainScanHandler) GetDomainHealth(c *gin.Context) {
 // GetDomainScans 获取域名扫描历史
 func (h *DomainScanHandler) GetDomainScans(c *gin.Context) {
 	domainID := c.Param("domainId")
+
+	// 检查域名是否存在且未删除
+	var domain models.Domain
+	if err := h.db.Where("id = ? AND deleted_at IS NULL AND status != ?", domainID, "deleted").First(&domain).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Domain not found or has been deleted"})
+		return
+	}
 
 	var scans []models.DomainScan
 	if err := h.db.Preload("Domain").
@@ -139,10 +156,29 @@ func (h *DomainScanHandler) GetHealthStatistics(c *gin.Context) {
 		DownDomains     int64 `json:"down_domains"`
 	}
 
-	h.db.Model(&models.DomainScanSummary{}).Count(&stats.TotalDomains)
-	h.db.Model(&models.DomainScanSummary{}).Where("overall_health = ?", "healthy").Count(&stats.HealthyDomains)
-	h.db.Model(&models.DomainScanSummary{}).Where("overall_health = ?", "degraded").Count(&stats.DegradedDomains)
-	h.db.Model(&models.DomainScanSummary{}).Where("overall_health = ?", "down").Count(&stats.DownDomains)
+	// 只统计未删除的域名
+	h.db.Model(&models.DomainScanSummary{}).
+		Joins("JOIN domains ON domains.id = domain_scan_summaries.domain_id").
+		Where("domains.deleted_at IS NULL AND domains.status != ?", "deleted").
+		Count(&stats.TotalDomains)
+
+	h.db.Model(&models.DomainScanSummary{}).
+		Joins("JOIN domains ON domains.id = domain_scan_summaries.domain_id").
+		Where("domains.deleted_at IS NULL AND domains.status != ?", "deleted").
+		Where("domain_scan_summaries.overall_health = ?", "healthy").
+		Count(&stats.HealthyDomains)
+
+	h.db.Model(&models.DomainScanSummary{}).
+		Joins("JOIN domains ON domains.id = domain_scan_summaries.domain_id").
+		Where("domains.deleted_at IS NULL AND domains.status != ?", "deleted").
+		Where("domain_scan_summaries.overall_health = ?", "degraded").
+		Count(&stats.DegradedDomains)
+
+	h.db.Model(&models.DomainScanSummary{}).
+		Joins("JOIN domains ON domains.id = domain_scan_summaries.domain_id").
+		Where("domains.deleted_at IS NULL AND domains.status != ?", "deleted").
+		Where("domain_scan_summaries.overall_health = ?", "down").
+		Count(&stats.DownDomains)
 
 	c.JSON(http.StatusOK, stats)
 }
@@ -260,11 +296,13 @@ func (h *DomainScanHandler) GetDomainScanSummaries(c *gin.Context) {
 		pageSizeInt = 200
 	}
 
-	query := h.db.Model(&models.DomainScanSummary{}).Preload("Domain")
+	query := h.db.Model(&models.DomainScanSummary{}).
+		Joins("JOIN domains ON domains.id = domain_scan_summaries.domain_id").
+		Where("domains.deleted_at IS NULL AND domains.status != ?", "deleted").
+		Preload("Domain")
 
 	if search != "" {
-		query = query.Joins("JOIN domains ON domains.id = domain_scan_summaries.domain_id").
-			Where("domains.full_domain LIKE ?", "%"+search+"%")
+		query = query.Where("domains.full_domain LIKE ?", "%"+search+"%")
 	}
 
 	if status != "" {
