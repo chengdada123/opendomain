@@ -221,6 +221,23 @@ const fetchRootDomain = async () => {
   }
 }
 
+// 辅助函数：将错误消息中的 RFC3339 时间转换为本地时间
+const convertTimeInErrorMessage = (message) => {
+  if (!message) return message
+  
+  // 匹配 RFC3339 格式的时间字符串，如 "2026-02-17T00:00:00Z" 或 "2026-02-17T00:00:00+08:00"
+  const rfc3339Pattern = /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2}))/g
+  
+  return message.replace(rfc3339Pattern, (match) => {
+    try {
+      const date = new Date(match)
+      return date.toLocaleString()
+    } catch (e) {
+      return match
+    }
+  })
+}
+
 const calculatePrice = async () => {
   calculating.value = true
   couponError.value = ''
@@ -241,13 +258,17 @@ const calculatePrice = async () => {
 
     // 显示优惠券错误信息（如果有）
     if (response.data.coupon_error) {
-      couponError.value = response.data.coupon_error
+      couponError.value = convertTimeInErrorMessage(response.data.coupon_error)
     } else if (couponCode.value && !response.data.coupon_applied) {
       couponError.value = 'Coupon could not be applied'
     }
   } catch (error) {
     console.error('Failed to calculate price:', error)
-    couponError.value = error.response?.data?.error || 'Failed to calculate price'
+    let errorMsg = error.response?.data?.error || 'Failed to calculate price'
+    
+    // 尝试从错误信息中提取时间并转换为本地时间
+    errorMsg = convertTimeInErrorMessage(errorMsg)
+    couponError.value = errorMsg
 
     // 如果有优惠券错误，重新计算不带优惠券的价格
     if (couponCode.value) {

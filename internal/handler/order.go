@@ -397,11 +397,11 @@ func (h *OrderHandler) validateCoupon(coupon *models.Coupon, userID uint) error 
 	// 检查有效期
 	if now.Before(coupon.ValidFrom) {
 		return fmt.Errorf("Coupon is not yet valid. This coupon will be available after %s",
-			coupon.ValidFrom.Format("2006-01-02 15:04:05"))
+			coupon.ValidFrom.Format(time.RFC3339))
 	}
 	if coupon.ValidUntil != nil && now.After(*coupon.ValidUntil) {
 		return fmt.Errorf("Coupon has expired on %s",
-			coupon.ValidUntil.Format("2006-01-02 15:04:05"))
+			coupon.ValidUntil.Format(time.RFC3339))
 	}
 
 	// 检查使用次数
@@ -416,7 +416,7 @@ func (h *OrderHandler) validateCoupon(coupon *models.Coupon, userID uint) error 
 		if err := h.db.Where("coupon_id = ? AND user_id = ?", coupon.ID, userID).
 			First(&usage).Error; err == nil {
 			return fmt.Errorf("You have already used this coupon on %s. This coupon can only be used once per user",
-				usage.UsedAt.Format("2006-01-02 15:04:05"))
+				usage.UsedAt.Format(time.RFC3339))
 		}
 	}
 

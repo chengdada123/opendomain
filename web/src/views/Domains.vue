@@ -1112,6 +1112,23 @@ const closeRenewModal = () => {
   renewPriceData.value = null
 }
 
+// 辅助函数：将错误消息中的 RFC3339 时间转换为本地时间
+const convertTimeInErrorMessage = (message) => {
+  if (!message) return message
+  
+  // 匹配 RFC3339 格式的时间字符串，如 "2026-02-17T00:00:00Z" 或 "2026-02-17T00:00:00+08:00"
+  const rfc3339Pattern = /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2}))/g
+  
+  return message.replace(rfc3339Pattern, (match) => {
+    try {
+      const date = new Date(match)
+      return date.toLocaleString()
+    } catch (e) {
+      return match
+    }
+  })
+}
+
 const applyRenewCoupon = async () => {
   if (!renewCouponCode.value || !selectedDomain.value) return
   
@@ -1133,13 +1150,14 @@ const applyRenewCoupon = async () => {
       renewCouponApplied.value = true
       toast.success(t('coupon.applySuccess'))
     } else if (response.data.coupon_error) {
-      // 使用后端返回的详细错误信息
-      renewCouponError.value = response.data.coupon_error
+      // 使用后端返回的详细错误信息，并转换时间为本地时间
+      renewCouponError.value = convertTimeInErrorMessage(response.data.coupon_error)
     } else {
       renewCouponError.value = t('domains.cannotApplyToRenewal')
     }
   } catch (error) {
-    renewCouponError.value = error.response?.data?.error || t('coupon.applyFailed')
+    const errorMsg = error.response?.data?.error || t('coupon.applyFailed')
+    renewCouponError.value = convertTimeInErrorMessage(errorMsg)
     renewPriceData.value = null
   } finally {
     renewCouponApplying.value = false

@@ -215,7 +215,21 @@ const applyCoupon = async () => {
     couponCode.value = ''
     await fetchUsageHistory()
   } catch (error) {
-    toast.error(error.response?.data?.error || 'Failed to apply coupon')
+    const errorData = error.response?.data
+    let errorMessage = errorData?.error || 'Failed to apply coupon'
+    
+    // 处理时间相关的错误，显示本地时间
+    if (errorData?.reason === 'coupon_not_yet_valid' && errorData?.valid_from) {
+      const validFrom = new Date(errorData.valid_from)
+      errorMessage += `\nThis coupon will be available after ${validFrom.toLocaleString()}`
+    } else if (errorData?.reason === 'coupon_expired' && errorData?.valid_until) {
+      const validUntil = new Date(errorData.valid_until)
+      errorMessage += `\nThis coupon expired on ${validUntil.toLocaleString()}`
+    } else if (errorData?.reason) {
+      errorMessage += `\n${errorData.reason}`
+    }
+    
+    toast.error(errorMessage)
   } finally {
     applying.value = false
   }
