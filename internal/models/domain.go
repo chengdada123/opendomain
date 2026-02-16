@@ -49,7 +49,9 @@ type Domain struct {
 	ReminderSent7d        bool           `gorm:"column:reminder_sent_7d;default:false" json:"-"`
 	DNSSynced             bool           `gorm:"default:false" json:"dns_synced"`
 	DNSSyncError          *string        `gorm:"type:text" json:"dns_sync_error,omitempty"`
-	FirstFailedAt         *time.Time     `gorm:"index" json:"first_failed_at,omitempty"` // Tracks when domain first failed health check
+	FirstFailedAt         *time.Time     `gorm:"index" json:"first_failed_at,omitempty"`    // Tracks when domain first failed health check
+	SuspendedAt           *time.Time     `json:"suspended_at,omitempty"`                     // When domain was suspended
+	SuspendReason         *string        `gorm:"type:text" json:"suspend_reason,omitempty"` // Reason for suspension
 	CreatedAt             time.Time      `json:"created_at"`
 	UpdatedAt             time.Time      `json:"updated_at"`
 	DeletedAt             gorm.DeletedAt `gorm:"index" json:"-"`

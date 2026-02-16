@@ -869,7 +869,11 @@ func (s *Scanner) handleAutoActions(domainID uint, safeBrowsingStatus, virusTota
 		}
 
 		if domain.Status != "suspended" {
+			now := time.Now()
 			domain.Status = "suspended"
+			domain.SuspendedAt = &now
+			reasonText := "Malicious content detected"
+			domain.SuspendReason = &reasonText
 			s.db.Save(&domain)
 
 			reason := fmt.Sprintf("Malicious content detected (Safe Browsing: %s, VirusTotal: %s)\nScan details: %s",
@@ -918,6 +922,9 @@ func (s *Scanner) handleAutoActions(domainID uint, safeBrowsingStatus, virusTota
 			} else if daysSinceFailure >= 7 && domain.Status != "suspended" {
 				// Suspend 域名
 				domain.Status = "suspended"
+				domain.SuspendedAt = &now
+				reasonText := fmt.Sprintf("Domain down for %d days", daysSinceFailure)
+				domain.SuspendReason = &reasonText
 				s.db.Save(&domain)
 
 				issues := []string{}
@@ -954,6 +961,8 @@ func (s *Scanner) handleAutoActions(domainID uint, safeBrowsingStatus, virusTota
 			domain.FirstFailedAt = nil
 			if domain.Status == "suspended" {
 				domain.Status = "active"
+				domain.SuspendedAt = nil
+				domain.SuspendReason = nil
 			}
 			s.db.Save(&domain)
 			telegram.SendHealthAlert(domain.FullDomain,
