@@ -300,6 +300,36 @@
         <button>close</button>
       </form>
     </dialog>
+
+    <!-- Suspend Reason Modal -->
+    <dialog class="modal" :class="{ 'modal-open': showSuspendModal }">
+      <div class="modal-box">
+        <h3 class="font-bold text-lg mb-4">{{ $t('adminDomains.suspendDomain') }}</h3>
+        <p class="py-4">
+          {{ $t('adminDomains.suspendDomainMessage', { domain: domainToSuspend?.full_domain }) }}
+        </p>
+        <div class="form-control">
+          <label class="label">
+            <span class="label-text">{{ $t('adminDomains.suspendReason') }}</span>
+          </label>
+          <textarea 
+            v-model="suspendReason" 
+            class="textarea textarea-bordered h-24" 
+            :placeholder="$t('adminDomains.suspendReasonPlaceholder')"
+          ></textarea>
+        </div>
+        <div class="modal-action">
+          <button @click="closeSuspendModal" class="btn">{{ $t('common.cancel') }}</button>
+          <button @click="handleSuspend" class="btn btn-warning" :disabled="suspending || !suspendReason.trim()">
+            <span v-if="suspending" class="loading loading-spinner loading-sm"></span>
+            <span v-else>{{ $t('adminDomains.suspend') }}</span>
+          </button>
+        </div>
+      </div>
+      <form method="dialog" class="modal-backdrop" @click="closeSuspendModal">
+        <button>close</button>
+      </form>
+    </dialog>
   </div>
 </template>
 
@@ -321,9 +351,13 @@ const statusFilter = ref('') // 状态筛选：''=全部, 'active', 'expired', '
 const loading = ref(true)
 const showDetailsModal = ref(false)
 const showDeleteModal = ref(false)
+const showSuspendModal = ref(false)
 const selectedDomain = ref(null)
 const domainToDelete = ref(null)
+const domainToSuspend = ref(null)
+const suspendReason = ref('')
 const deleting = ref(false)
+const suspending = ref(false)
 const syncing = ref(false) // FOSSBilling同步状态
 const stats = ref({
   total: 0,
@@ -472,14 +506,53 @@ const handleDelete = async () => {
 }
 
 const toggleDomainStatus = async (domain) => {
+  const newStatus = domain.status === 'suspended' ? 'active' : 'suspended'
+  
+  // If suspending, show modal to get reason
+  if (newStatus === 'suspended') {
+    domainToSuspend.value = domain
+    suspendReason.value = ''
+    showSuspendModal.value = true
+    return
+  }
+  
+  // If activating, proceed directly
   try {
-    const newStatus = domain.status === 'suspended' ? 'active' : 'suspended'
     await axios.put(`/api/admin/domains/${domain.id}/status`, { status: newStatus })
     toast.success(t('adminDomains.statusUpdateSuccess'))
     await fetchStats() // 刷新统计
     await fetchDomains(searchQuery.value)
   } catch (error) {
     toast.error(error.response?.data?.error || t('adminDomains.statusUpdateFailed'))
+  }
+}
+
+const closeSuspendModal = () => {
+  showSuspendModal.value = false
+  domainToSuspend.value = null
+  suspendReason.value = ''
+}
+
+const handleSuspend = async () => {
+  if (!suspendReason.value.trim()) {
+    toast.error(t('adminDomains.reasonRequired'))
+    return
+  }
+  
+  suspending.value = true
+  try {
+    await axios.put(`/api/admin/domains/${domainToSuspend.value.id}/status`, { 
+      status: 'suspended',
+      reason: suspendReason.value.trim()
+    })
+    toast.success(t('adminDomains.statusUpdateSuccess'))
+    closeSuspendModal()
+    await fetchStats() // 刷新统计
+    await fetchDomains(searchQuery.value)
+  } catch (error) {
+    toast.error(error.response?.data?.error || t('adminDomains.statusUpdateFailed'))
+  } finally {
+    suspending.value = false
   }
 }
 
