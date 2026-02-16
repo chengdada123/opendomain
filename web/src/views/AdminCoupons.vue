@@ -245,6 +245,28 @@ const showEditModal = ref(false)
 const submitting = ref(false)
 const editingCoupon = ref(null)
 
+// 时区转换辅助函数：将UTC时间字符串转换为本地时间字符串（用于datetime-local输入）
+const toLocalDatetimeString = (utcDateString) => {
+  if (!utcDateString) return null
+  const date = new Date(utcDateString)
+  // 获取本地时间的各个部分
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  return `${year}-${month}-${day}T${hours}:${minutes}`
+}
+
+// 时区转换辅助函数：将本地时间字符串（来自datetime-local输入）转换为UTC ISO字符串
+const toUTCString = (localDatetimeString) => {
+  if (!localDatetimeString) return null
+  // datetime-local 返回的格式类似 "2024-01-01T12:00"
+  // 创建Date对象时，它会被当作本地时间
+  const date = new Date(localDatetimeString)
+  return date.toISOString()
+}
+
 const form = ref({
   code: '',
   description: '',
@@ -280,6 +302,9 @@ const handleSubmit = async () => {
     const payload = {
       ...form.value,
       code: form.value.code.toUpperCase(),
+      // 将本地时间转换为UTC时间
+      valid_from: toUTCString(form.value.valid_from),
+      valid_until: toUTCString(form.value.valid_until),
     }
 
     if (showEditModal.value) {
@@ -307,8 +332,9 @@ const editCoupon = (coupon) => {
     discount_value: coupon.discount_value,
     quota_increase: coupon.quota_increase || 1,
     max_uses: coupon.max_uses || 0,
-    valid_from: coupon.valid_from ? new Date(coupon.valid_from).toISOString().slice(0, 16) : null,
-    valid_until: coupon.valid_until ? new Date(coupon.valid_until).toISOString().slice(0, 16) : null,
+    // 将UTC时间转换为本地时间填充表单
+    valid_from: toLocalDatetimeString(coupon.valid_from),
+    valid_until: toLocalDatetimeString(coupon.valid_until),
     is_active: coupon.is_active,
     is_reusable: coupon.is_reusable || false,
   }
