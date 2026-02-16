@@ -1351,10 +1351,17 @@ func (h *DomainHandler) AdminUpdateDomainStatus(c *gin.Context) {
 	domainID := c.Param("id")
 
 	var req struct {
-		Status string `json:"status" binding:"required,oneof=active suspended"`
+		Status string  `json:"status" binding:"required,oneof=active suspended"`
+		Reason *string `json:"reason"` // 挂起原因（当 status 为 suspended 时可选）
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 如果是挂起操作且没有提供原因，返回错误
+	if req.Status == "suspended" && (req.Reason == nil || *req.Reason == "") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Reason is required when suspending a domain"})
 		return
 	}
 
@@ -1364,7 +1371,34 @@ func (h *DomainHandler) AdminUpdateDomainStatus(c *gin.Context) {
 		return
 	}
 
-	if err := h.db.Model(&domain).Update("status", req.Status).Error; err != nil {
+	oldStatus := domain.Status
+	now := timeutil.Now()
+
+	// 更新域名状态
+	updates := map[string]interface{}{
+		"status": req.Status,
+	}
+
+	if req.Status == "suspended" {
+		// 挂起域名：记录时间和原因
+		updates["suspended_at"] = now
+		updates["suspend_reason"] = *req.Reason
+
+		// 记录到 suspend_history 表
+		history := models.SuspendHistory{
+			DomainID: domain.ID,
+			Reason:   "Manual suspension by admin",
+			Details:  *req.Reason,
+		}
+		h.db.Create(&history)
+	} else if req.Status == "active" && oldStatus == "suspended" {
+		// 激活域名：清除挂起信息
+		updates["suspended_at"] = nil
+		updates["suspend_reason"] = nil
+		updates["first_failed_at"] = nil // 同时清除失败记录
+	}
+
+	if err := h.db.Model(&domain).Updates(updates).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update domain status"})
 		return
 	}
@@ -1380,7 +1414,12 @@ func (h *DomainHandler) AdminUpdateDomainStatus(c *gin.Context) {
 		}()
 	}
 
-	domain.Status = req.Status
+	// 重新加载域名数据以返回最新信息
+	if err := h.db.Preload("User").Preload("RootDomain").First(&domain, domainID).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to reload domain"})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Domain status updated",
 		"domain":  domain.ToResponse(),
