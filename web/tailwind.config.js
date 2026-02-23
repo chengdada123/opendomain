@@ -5,12 +5,35 @@ export default {
     "./src/**/*.{vue,js,ts,jsx,tsx}",
   ],
   theme: {
-    extend: {},
+    extend: {
+      typography: {
+        DEFAULT: {
+          css: {
+            '--tw-prose-body': 'var(--bc)',
+            '--tw-prose-headings': 'var(--bc)',
+            '--tw-prose-lead': 'var(--bc)',
+            '--tw-prose-links': 'var(--p)',
+            '--tw-prose-bold': 'var(--bc)',
+            '--tw-prose-counters': 'var(--bc)',
+            '--tw-prose-bullets': 'var(--bc)',
+            '--tw-prose-hr': 'var(--b3)',
+            '--tw-prose-quotes': 'var(--bc)',
+            '--tw-prose-quote-borders': 'var(--p)',
+            '--tw-prose-captions': 'var(--bc)',
+            '--tw-prose-code': 'var(--bc)',
+            '--tw-prose-pre-code': 'var(--bc)',
+            '--tw-prose-pre-bg': 'var(--b2)',
+            '--tw-prose-th-borders': 'var(--b3)',
+            '--tw-prose-td-borders': 'var(--b3)',
+          },
+        },
+      },
+    },
   },
-  plugins: [require("daisyui")],
+  plugins: [require("daisyui"), require("@tailwindcss/typography")],
   daisyui: {
-    themes: ["light", "dark", "cupcake"], // 可以自定义主题
-    darkTheme: "dark", // 默认暗色主题名称
+    themes: ["light", "dark", "cupcake"],
+    darkTheme: "dark",
     base: true,
     styled: true,
     utils: true,

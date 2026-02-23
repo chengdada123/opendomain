@@ -177,6 +177,11 @@ const routes = [
     name: 'PageView',
     component: () => import('../views/PageView.vue'),
   },
+  {
+    path: '/whois/:domain',
+    name: 'WhoisDetail',
+    component: () => import('../views/WhoisDetail.vue'),
+  },
 ]
 
 const router = createRouter({

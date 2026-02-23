@@ -26,9 +26,12 @@ instance.interceptors.response.use(
   },
   (error) => {
     if (error.response?.status === 401) {
-      // Token 过期或无效
-      localStorage.removeItem('token')
-      window.location.href = '/login'
+      // Token 过期或无效，但登录接口本身的 401 不跳转
+      const url = error.config?.url || ''
+      if (!url.includes('/auth/login') && !url.includes('/auth/register')) {
+        localStorage.removeItem('token')
+        window.location.href = '/login'
+      }
     } else if (error.response?.status === 403) {
       // 如果是管理员端点返回403，说明token没有admin权限
       // 检查是否是管理员端点

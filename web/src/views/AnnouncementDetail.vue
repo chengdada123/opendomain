@@ -83,6 +83,8 @@
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from '../utils/axios'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 
 const route = useRoute()
 const router = useRouter()
@@ -171,10 +173,7 @@ const formatDate = (dateString) => {
 }
 
 const formatContent = (content) => {
-  // Basic markdown-like formatting
-  return content
-    .replace(/\n/g, '<br>')
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+  if (!content) return ''
+  return DOMPurify.sanitize(marked.parse(content))
 }
 </script>

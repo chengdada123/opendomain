@@ -92,6 +92,9 @@ type DomainResponse struct {
 	Nameservers           string        `json:"nameservers"`
 	UseDefaultNameservers bool          `json:"use_default_nameservers"`
 	DNSSynced             bool          `json:"dns_synced"`
+	FirstFailedAt         *time.Time    `json:"first_failed_at,omitempty"`
+	SuspendedAt           *time.Time    `json:"suspended_at,omitempty"`
+	SuspendReason         *string       `json:"suspend_reason,omitempty"`
 	RootDomain            *RootDomain   `json:"root_domain,omitempty"`
 	User                  *UserResponse `json:"user,omitempty"`
 }
@@ -111,6 +114,9 @@ func (d *Domain) ToResponse() *DomainResponse {
 		Nameservers:           d.Nameservers,
 		UseDefaultNameservers: d.UseDefaultNameservers,
 		DNSSynced:             d.DNSSynced,
+		FirstFailedAt:         d.FirstFailedAt,
+		SuspendedAt:           d.SuspendedAt,
+		SuspendReason:         d.SuspendReason,
 		RootDomain:            d.RootDomain,
 	}
 	if d.User != nil {

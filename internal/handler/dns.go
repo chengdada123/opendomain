@@ -172,18 +172,24 @@ func (h *DNSHandler) CreateRecord(c *gin.Context) {
 		return
 	}
 
-	// CNAME 冲突检查：CNAME 不能与同名的其他记录共存（仅检查活跃记录）
+	// 禁止在 zone apex (@) 使用 CNAME，应使用 ALIAS 代替
+	if req.Type == "CNAME" && (req.Name == "@" || req.Name == "") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "CNAME records cannot be used at the zone apex (@). Use an ALIAS record instead for CNAME flattening at the root."})
+		return
+	}
+
+	// CNAME/ALIAS 冲突检查：CNAME/ALIAS 不能与同名的其他记录共存（仅检查活跃记录）
 	var conflictCount int64
-	if req.Type == "CNAME" {
-		h.db.Model(&models.DNSRecord{}).Where("domain_id = ? AND name = ? AND type != ? AND is_active = ?", domain.ID, req.Name, "CNAME", true).Count(&conflictCount)
+	if req.Type == "CNAME" || req.Type == "ALIAS" {
+		h.db.Model(&models.DNSRecord{}).Where("domain_id = ? AND name = ? AND type NOT IN ? AND is_active = ?", domain.ID, req.Name, []string{"CNAME", "ALIAS"}, true).Count(&conflictCount)
 		if conflictCount > 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "CNAME record cannot coexist with other record types at the same name"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "CNAME/ALIAS record cannot coexist with other record types at the same name"})
 			return
 		}
 	} else {
-		h.db.Model(&models.DNSRecord{}).Where("domain_id = ? AND name = ? AND type = ? AND is_active = ?", domain.ID, req.Name, "CNAME", true).Count(&conflictCount)
+		h.db.Model(&models.DNSRecord{}).Where("domain_id = ? AND name = ? AND type IN ? AND is_active = ?", domain.ID, req.Name, []string{"CNAME", "ALIAS"}, true).Count(&conflictCount)
 		if conflictCount > 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot add this record because a CNAME record already exists at the same name"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot add this record because a CNAME/ALIAS record already exists at the same name"})
 			return
 		}
 	}
@@ -374,7 +380,7 @@ func validateDNSRecord(recordType, content string) error {
 		if !isValidIPv6(content) {
 			return fmt.Errorf("invalid IPv6 address")
 		}
-	case "CNAME", "NS":
+	case "CNAME", "ALIAS", "NS":
 		// 域名验证
 		if content == "" {
 			return fmt.Errorf("content cannot be empty")

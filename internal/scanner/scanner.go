@@ -885,7 +885,9 @@ func (s *Scanner) handleAutoActions(domainID uint, safeBrowsingStatus, virusTota
 				Reason:   "Malicious content detected",
 				Details:  reason,
 			}
-			s.db.Create(&history)
+			if err := s.db.Create(&history).Error; err != nil {
+				fmt.Printf("[ERROR] Failed to create suspend history for domain %s: %v\n", domain.FullDomain, err)
+			}
 
 			telegram.SendAutoSuspendNotification(domain.FullDomain, reason)
 		}
@@ -945,7 +947,9 @@ func (s *Scanner) handleAutoActions(domainID uint, safeBrowsingStatus, virusTota
 					Reason:   fmt.Sprintf("Domain down for %d days", daysSinceFailure),
 					Details:  fmt.Sprintf("DNS Status: %s, HTTP Status: %s%s", summary.DNSStatus, summary.HTTPStatus, issuesText),
 				}
-				s.db.Create(&history)
+				if err := s.db.Create(&history).Error; err != nil {
+					fmt.Printf("[ERROR] Failed to create suspend history for domain %s: %v\n", domain.FullDomain, err)
+				}
 
 				telegram.SendHealthAlert(domain.FullDomain,
 					[]string{fmt.Sprintf("Domain down for %d days", daysSinceFailure)},

@@ -27,6 +27,8 @@ import { ref, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import axios from '../utils/axios'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 
 const route = useRoute()
 const { t } = useI18n()
@@ -48,9 +50,8 @@ const fetchPage = async () => {
 }
 
 const renderContent = (content) => {
-  // Simple HTML rendering
-  // You can add markdown parsing here if needed
-  return content
+  if (!content) return ''
+  return DOMPurify.sanitize(marked.parse(content))
 }
 
 const formatDate = (date) => {

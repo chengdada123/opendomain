@@ -138,7 +138,91 @@ func (h *DomainHandler) SearchDomain(c *gin.Context) {
 		response["message"] = "This domain is reserved and can only be activated by syncing from FOSSBilling"
 	}
 
+	if !available && !reserved {
+		response["domain_info"] = gin.H{
+			"status":        existingDomain.Status,
+			"registered_at": existingDomain.RegisteredAt,
+			"expires_at":    existingDomain.ExpiresAt,
+			"suspended_at":  existingDomain.SuspendedAt,
+			"suspend_reason": existingDomain.SuspendReason,
+		}
+	}
+
 	c.JSON(http.StatusOK, response)
+}
+
+// WhoisDomain 查询域名 WHOIS 信息（公开）
+func (h *DomainHandler) WhoisDomain(c *gin.Context) {
+	fullDomain := c.Param("domain")
+	if fullDomain == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "domain is required"})
+		return
+	}
+
+	var domain models.Domain
+	if err := h.db.Where("full_domain = ?", fullDomain).First(&domain).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Domain not found"})
+		return
+	}
+
+	now := time.Now()
+
+	// 计算待挂起/待删除剩余天数
+	var daysSinceFailure float64
+	var daysUntilSuspension *int
+	var daysUntilDeletion *int
+
+	if domain.FirstFailedAt != nil {
+		daysSinceFailure = now.Sub(*domain.FirstFailedAt).Hours() / 24
+		if domain.Status != "suspended" {
+			d := 7 - int(daysSinceFailure)
+			if d < 0 {
+				d = 0
+			}
+			daysUntilSuspension = &d
+		} else {
+			d := 30 - int(daysSinceFailure)
+			if d < 0 {
+				d = 0
+			}
+			daysUntilDeletion = &d
+		}
+	}
+
+	// 查询扫描摘要
+	var scanInfo gin.H
+	var summary models.DomainScanSummary
+	if err := h.db.Where("domain_id = ?", domain.ID).First(&summary).Error; err == nil {
+		var uptime float64
+		if summary.TotalScans > 0 {
+			uptime = float64(summary.SuccessfulScans) / float64(summary.TotalScans) * 100
+		}
+		scanInfo = gin.H{
+			"overall_health":      summary.OverallHealth,
+			"http_status":         summary.HTTPStatus,
+			"dns_status":          summary.DNSStatus,
+			"ssl_status":          summary.SSLStatus,
+			"safe_browsing_status": summary.SafeBrowsingStatus,
+			"virustotal_status":   summary.VirusTotalStatus,
+			"uptime_percentage":   uptime,
+			"total_scans":         summary.TotalScans,
+			"successful_scans":    summary.SuccessfulScans,
+			"last_scanned_at":     summary.LastScannedAt,
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"full_domain":           domain.FullDomain,
+		"status":                domain.Status,
+		"registered_at":         domain.RegisteredAt,
+		"expires_at":            domain.ExpiresAt,
+		"suspended_at":          domain.SuspendedAt,
+		"suspend_reason":        domain.SuspendReason,
+		"first_failed_at":       domain.FirstFailedAt,
+		"days_until_suspension": daysUntilSuspension,
+		"days_until_deletion":   daysUntilDeletion,
+		"scan":                  scanInfo,
+	})
 }
 
 // RegisterDomain 注册域名（仅适用于免费域名）

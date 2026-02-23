@@ -226,7 +226,7 @@ func setDefaults() {
 	viper.SetDefault("REDIS_PORT", 6379)
 	viper.SetDefault("REDIS_DB", 0)
 
-	viper.SetDefault("JWT_EXPIRES_IN", 2)
+	viper.SetDefault("JWT_EXPIRES_IN", 168)
 
 	viper.SetDefault("SCANNER_CONCURRENCY", 10)
 	viper.SetDefault("SCANNER_TIMEOUT", 30)

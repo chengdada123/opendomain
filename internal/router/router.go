@@ -77,6 +77,8 @@ func Setup(db *gorm.DB, rdb *redis.Client, cfg *config.Config) *gin.Engine {
 			public.GET("/pages/:slug", pageHandler.GetPublicPageBySlug)
 			// 待激活域名列表(公开)
 			public.GET("/pending-domains", fossBillingSyncHandler.GetPublicPendingDomains)
+			// WHOIS 查询
+			public.GET("/whois/:domain", domainHandler.WhoisDomain)
 		}
 
 		// 支付回调路由（公开，通过签名验证）

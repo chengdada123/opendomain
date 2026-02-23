@@ -11,7 +11,7 @@ type DNSRecord struct {
 	ID              uint           `gorm:"primarykey" json:"id"`
 	DomainID        uint           `gorm:"not null;index" json:"domain_id"`
 	Name            string         `gorm:"size:255;not null" json:"name"`
-	Type            string         `gorm:"size:20;not null" json:"type"` // A, AAAA, CNAME, MX, TXT, NS, SRV, CAA
+	Type            string         `gorm:"size:20;not null" json:"type"` // A, AAAA, CNAME, ALIAS, MX, TXT, NS, SRV, CAA
 	Content         string         `gorm:"type:text;not null" json:"content"`
 	TTL             int            `gorm:"default:3600" json:"ttl"`
 	Priority        *int           `json:"priority,omitempty"` // For MX and SRV records
@@ -34,7 +34,7 @@ func (DNSRecord) TableName() string {
 // DNSRecordCreateRequest 创建 DNS 记录请求
 type DNSRecordCreateRequest struct {
 	Name     string `json:"name" binding:"required"`
-	Type     string `json:"type" binding:"required,oneof=A AAAA CNAME MX TXT NS SRV CAA"`
+	Type     string `json:"type" binding:"required,oneof=A AAAA CNAME ALIAS MX TXT NS SRV CAA"`
 	Content  string `json:"content" binding:"required"`
 	TTL      int    `json:"ttl" binding:"min=60,max=86400"`
 	Priority *int   `json:"priority,omitempty"`

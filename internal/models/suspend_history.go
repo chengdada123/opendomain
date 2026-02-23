@@ -12,7 +12,7 @@ type SuspendHistory struct {
 	CreatedAt time.Time `json:"created_at"`
 
 	// UI 相关字段
-	DomainName string `json:"domain_name" gorm:"-"` // 域名全称（用于查询结果）
+	DomainName string `json:"domain_name" gorm:"->"` // 域名全称（用于查询结果）
 }
 
 // SuspendHistoryResponse 用于API响应

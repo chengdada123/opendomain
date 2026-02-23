@@ -132,6 +132,16 @@
                     <h3 class="font-bold">{{ searchResult.message }}</h3>
                     <p class="text-sm opacity-80 mt-1">{{ $t('home.tryDifferent') }}</p>
                   </div>
+                  <button
+                    v-if="searchResult.domainInfo"
+                    @click="$router.push(`/whois/${searchResult.fullDomain}`)"
+                    class="btn btn-sm btn-outline"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    View Detail
+                  </button>
                 </div>
               </div>
             </transition>
@@ -302,6 +312,7 @@
         </div>
       </div>
     </section>
+
   </div>
 </template>
 
@@ -371,6 +382,7 @@ const searchDomain = async () => {
       isFree: rootDomain?.is_free ?? true,
       pricePerYear: rootDomain?.price_per_year,
       lifetimePrice: rootDomain?.lifetime_price,
+      domainInfo: response.data.domain_info || null,
     }
   } catch (error) {
     searchResult.value = {
