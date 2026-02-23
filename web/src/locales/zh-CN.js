@@ -841,7 +841,7 @@ export default {
     copied: '已复制！',
     copyFailed: '复制失败',
     aliasHintTitle: 'ALIAS（CNAME 拉平）：',
-    aliasHint: '在根域（@）处使用，将 apex 域名指向一个主机名。PowerDNS 会自动解析目标并返回 A/AAAA 记录——与 CNAME 不同，ALIAS 允许在根域使用。'
+    aliasHint: "在根域（{'@'}）处使用，将 apex 域名指向一个主机名。PowerDNS 会自动解析目标并返回 A/AAAA 记录——与 CNAME 不同，ALIAS 允许在根域使用。"
   },
   page: {
     lastUpdated: '最后更新',

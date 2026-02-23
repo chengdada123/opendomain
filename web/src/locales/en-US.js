@@ -841,7 +841,7 @@ export default {
     copied: 'Copied!',
     copyFailed: 'Failed to copy',
     aliasHintTitle: 'ALIAS (CNAME Flattening):',
-    aliasHint: 'Use this at the zone root (@) to point your apex domain to a hostname. PowerDNS resolves the target and returns A/AAAA records transparently — unlike CNAME, it is allowed at the root.'
+    aliasHint: "Use this at the zone root ({'@'}) to point your apex domain to a hostname. PowerDNS resolves the target and returns A/AAAA records transparently — unlike CNAME, it is allowed at the root."
   },
   page: {
     lastUpdated: 'Last Updated',
