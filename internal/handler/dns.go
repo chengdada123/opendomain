@@ -366,6 +366,18 @@ func (h *DNSHandler) DeleteRecord(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "DNS record deleted successfully"})
 }
 
+// normalizePowerDNSContent 确保需要 FQDN 的记录类型在内容末尾有尾点
+// PowerDNS 要求 ALIAS、CNAME、NS、MX 等的目标为绝对域名（以 . 结尾）
+func normalizePowerDNSContent(recordType, content string) string {
+	switch recordType {
+	case "ALIAS", "CNAME", "NS", "MX":
+		if content != "" && !strings.HasSuffix(content, ".") {
+			return content + "."
+		}
+	}
+	return content
+}
+
 // validateDNSRecord 验证 DNS 记录内容
 func validateDNSRecord(recordType, content string) error {
 	// 基本验证，可以根据需要扩展
@@ -445,7 +457,7 @@ func (h *DNSHandler) syncRecordSetToPowerDNS(record *models.DNSRecord, domain *m
 	entries := make([]powerdns.RecordEntry, 0, len(allRecords))
 	for _, r := range allRecords {
 		entries = append(entries, powerdns.RecordEntry{
-			Content:  r.Content,
+			Content:  normalizePowerDNSContent(r.Type, r.Content),
 			Priority: r.Priority,
 		})
 	}
@@ -543,7 +555,7 @@ func (h *DNSHandler) deleteRecordFromPowerDNS(record *models.DNSRecord, domain *
 		entries := make([]powerdns.RecordEntry, 0, len(remaining))
 		for _, r := range remaining {
 			entries = append(entries, powerdns.RecordEntry{
-				Content:  r.Content,
+				Content:  normalizePowerDNSContent(r.Type, r.Content),
 				Priority: r.Priority,
 			})
 		}
