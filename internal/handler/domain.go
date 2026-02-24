@@ -211,6 +211,12 @@ func (h *DomainHandler) WhoisDomain(c *gin.Context) {
 		}
 	}
 
+	// 解析 nameservers JSON 数组
+	var nameservers []string
+	if domain.Nameservers != "" {
+		_ = json.Unmarshal([]byte(domain.Nameservers), &nameservers)
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"full_domain":           domain.FullDomain,
 		"status":                domain.Status,
@@ -221,6 +227,7 @@ func (h *DomainHandler) WhoisDomain(c *gin.Context) {
 		"first_failed_at":       domain.FirstFailedAt,
 		"days_until_suspension": daysUntilSuspension,
 		"days_until_deletion":   daysUntilDeletion,
+		"nameservers":           nameservers,
 		"scan":                  scanInfo,
 	})
 }

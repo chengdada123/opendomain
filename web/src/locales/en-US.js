@@ -1128,6 +1128,7 @@ export default {
     virusTotal: 'VirusTotal',
     totalScans: 'Total Scans',
     totalScansValue: '{total} ({successful} successful)',
+    nameservers: 'Nameservers',
     day: 'day',
     days: 'days'
   },

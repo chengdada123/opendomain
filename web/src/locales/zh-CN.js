@@ -1128,6 +1128,7 @@ export default {
     virusTotal: 'VirusTotal',
     totalScans: '扫描总数',
     totalScansValue: '{total} 次（{successful} 次成功）',
+    nameservers: 'NS 服务器',
     day: '天',
     days: '天'
   },

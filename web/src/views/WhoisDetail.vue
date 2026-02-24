@@ -110,6 +110,12 @@
                 <td class="opacity-60 font-medium text-sm">{{ $t('whois.firstFailed') }}</td>
                 <td class="text-sm">{{ formatDate(whois.first_failed_at) }}</td>
               </tr>
+              <tr v-if="whois.nameservers && whois.nameservers.length">
+                <td class="opacity-60 font-medium text-sm">{{ $t('whois.nameservers') }}</td>
+                <td>
+                  <div v-for="ns in whois.nameservers" :key="ns" class="font-mono text-sm">{{ ns }}</div>
+                </td>
+              </tr>
             </tbody>
           </table>
         </div>
