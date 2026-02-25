@@ -846,7 +846,26 @@ func (h *PaymentHandler) createDomainFromOrder(tx *gorm.DB, order *models.Order)
 	}
 
 	if err := tx.Create(domain).Error; err != nil {
-		return err
+		// 如果是唯一约束冲突（域名已被软删除），尝试恢复该记录
+		if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "unique constraint") {
+			var softDeleted models.Domain
+			if dbErr := tx.Unscoped().Where("full_domain = ?", domain.FullDomain).First(&softDeleted).Error; dbErr == nil {
+				if restoreErr := tx.Unscoped().Model(&softDeleted).Updates(map[string]interface{}{
+					"deleted_at":    nil,
+					"user_id":       domain.UserID,
+					"status":        domain.Status,
+					"expires_at":    domain.ExpiresAt,
+					"registered_at": domain.RegisteredAt,
+				}).Error; restoreErr != nil {
+					return fmt.Errorf("failed to restore domain %s: %w", domain.FullDomain, restoreErr)
+				}
+				domain.ID = softDeleted.ID
+			} else {
+				return fmt.Errorf("failed to create domain %s: %w", domain.FullDomain, err)
+			}
+		} else {
+			return err
+		}
 	}
 
 	// 更新订单

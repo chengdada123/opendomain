@@ -414,9 +414,34 @@ func (h *FOSSBillingSyncHandler) syncDomains(userID uint, fossDomains []FOSSBill
 		}
 
 		if err := h.db.Create(&domain).Error; err != nil {
-			result.Errors++
-			result.Details = append(result.Details, fmt.Sprintf("Failed to create domain %s: %v", fossDomain.Domain, err))
-			continue
+			// 如果是唯一约束冲突（域名已被软删除），尝试恢复该记录
+			if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "unique constraint") {
+				var softDeleted models.Domain
+				if dbErr := h.db.Unscoped().Where("full_domain = ?", fossDomain.Domain).First(&softDeleted).Error; dbErr == nil {
+					restoreErr := h.db.Unscoped().Model(&softDeleted).Updates(map[string]interface{}{
+						"deleted_at":    nil,
+						"user_id":       userID,
+						"status":        status,
+						"expires_at":    expiresAt,
+						"registered_at": registeredAt,
+					}).Error
+					if restoreErr != nil {
+						result.Errors++
+						result.Details = append(result.Details, fmt.Sprintf("Failed to restore domain %s: %v", fossDomain.Domain, restoreErr))
+						continue
+					}
+					domain = softDeleted
+					result.Details = append(result.Details, fmt.Sprintf("Restored previously deleted domain: %s", fossDomain.Domain))
+				} else {
+					result.Errors++
+					result.Details = append(result.Details, fmt.Sprintf("Failed to create domain %s: %v", fossDomain.Domain, err))
+					continue
+				}
+			} else {
+				result.Errors++
+				result.Details = append(result.Details, fmt.Sprintf("Failed to create domain %s: %v", fossDomain.Domain, err))
+				continue
+			}
 		}
 
 		// 如果是从待激活列表激活的，删除pending_domain记录

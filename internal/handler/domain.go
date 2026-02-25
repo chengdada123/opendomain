@@ -110,17 +110,17 @@ func (h *DomainHandler) SearchDomain(c *gin.Context) {
 
 	fullDomain := fmt.Sprintf("%s.%s", req.Subdomain, rootDomain.Domain)
 
-	// 检查是否已被注册
+	// 检查是否已被注册（包括软删除的记录，因为唯一约束仍然生效）
 	var existingDomain models.Domain
-	err := h.db.Where("full_domain = ?", fullDomain).First(&existingDomain).Error
+	err := h.db.Unscoped().Where("full_domain = ?", fullDomain).First(&existingDomain).Error
 
 	available := err == gorm.ErrRecordNotFound
 
-	// 检查是否在待激活列表中
+	// 检查是否在待激活列表中（包括软删除的pending记录，这类域名属于FOSSBilling订单）
 	reserved := false
 	if available {
 		var pendingDomain models.PendingDomain
-		if err := h.db.Where("full_domain = ? AND deleted_at IS NULL", fullDomain).First(&pendingDomain).Error; err == nil {
+		if err := h.db.Unscoped().Where("full_domain = ?", fullDomain).First(&pendingDomain).Error; err == nil {
 			available = false
 			reserved = true
 		}
@@ -297,9 +297,9 @@ func (h *DomainHandler) RegisterDomain(c *gin.Context) {
 
 	fullDomain := fmt.Sprintf("%s.%s", req.Subdomain, rootDomain.Domain)
 
-	// 检查是否已存在
+	// 检查是否已存在（包括软删除的记录，因为唯一约束仍生效）
 	var existingDomain models.Domain
-	if err := h.db.Where("full_domain = ?", fullDomain).First(&existingDomain).Error; err == nil {
+	if err := h.db.Unscoped().Where("full_domain = ?", fullDomain).First(&existingDomain).Error; err == nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "Domain already registered"})
 		return
 	}
@@ -415,7 +415,11 @@ func (h *DomainHandler) RegisterDomain(c *gin.Context) {
 	})
 
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to register domain"})
+		if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "unique constraint") {
+			c.JSON(http.StatusConflict, gin.H{"error": "Domain already registered"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to register domain"})
+		}
 		return
 	}
 
