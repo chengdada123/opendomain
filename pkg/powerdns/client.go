@@ -283,21 +283,27 @@ type CryptoKey struct {
 	Bits      int      `json:"bits"`
 }
 
-// EnableDNSSEC enables DNSSEC for a zone and creates a CSK if none exist, then rectifies
+// EnableDNSSEC enables DNSSEC for a zone by creating a CSK if none exist, then rectifies.
+// The zone must already exist. Creating an active key implicitly enables DNSSEC in PowerDNS.
 func (c *Client) EnableDNSSEC(domain string) error {
 	zoneName := ensureTrailingDot(domain)
-	url := fmt.Sprintf("%s/api/v1/servers/%s/zones/%s", c.BaseURL, c.ServerID, zoneName)
-	body, err := json.Marshal(map[string]interface{}{"dnssec": true})
+
+	// Check if any active keys already exist
+	keys, err := c.GetCryptoKeys(domain)
 	if err != nil {
-		return fmt.Errorf("failed to marshal request: %w", err)
-	}
-	if _, err = c.doRequest("PUT", url, body); err != nil {
-		return err
+		// GetCryptoKeys failed - zone might exist but API issue
+		keys = []CryptoKey{}
 	}
 
-	// If no keys exist yet, create a CSK
-	keys, err := c.GetCryptoKeys(domain)
-	if err == nil && len(keys) == 0 {
+	hasActiveKey := false
+	for _, k := range keys {
+		if k.Active {
+			hasActiveKey = true
+			break
+		}
+	}
+
+	if !hasActiveKey {
 		keyURL := fmt.Sprintf("%s/api/v1/servers/%s/zones/%s/cryptokeys", c.BaseURL, c.ServerID, zoneName)
 		keyBody, _ := json.Marshal(map[string]interface{}{
 			"keytype":   "csk",
@@ -348,6 +354,37 @@ func (c *Client) RectifyZone(domain string) error {
 	url := fmt.Sprintf("%s/api/v1/servers/%s/zones/%s/rectify", c.BaseURL, c.ServerID, zoneName)
 	_, err := c.doRequest("PUT", url, nil)
 	return err
+}
+
+// PublishDSToParentZone reads the DS records from the child zone's crypto keys
+// and writes them as a DS RRset into the parent zone at the delegation point.
+func (c *Client) PublishDSToParentZone(childDomain, parentZone string) error {
+	keys, err := c.GetCryptoKeys(childDomain)
+	if err != nil {
+		return fmt.Errorf("failed to get crypto keys for %s: %w", childDomain, err)
+	}
+
+	var dsContents []string
+	for _, k := range keys {
+		if k.Active && k.Published {
+			dsContents = append(dsContents, k.DS...)
+		}
+	}
+	if len(dsContents) == 0 {
+		return fmt.Errorf("no active DS records found for %s", childDomain)
+	}
+
+	entries := make([]RecordEntry, len(dsContents))
+	for i, ds := range dsContents {
+		entries[i] = RecordEntry{Content: ds}
+	}
+
+	return c.SetRecords(parentZone, childDomain, "DS", entries, 3600)
+}
+
+// UnpublishDSFromParentZone removes the DS RRset of the child zone from the parent zone.
+func (c *Client) UnpublishDSFromParentZone(childDomain, parentZone string) error {
+	return c.DeleteRRset(parentZone, childDomain, "DS")
 }
 
 // ensureTrailingDot 确保域名以点结尾

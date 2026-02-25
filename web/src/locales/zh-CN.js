@@ -853,7 +853,10 @@ export default {
     dnssecOperationFailed: 'DNSSEC 操作失败',
     dnssecNoKeys: '未找到 DNSSEC 密钥，请稍后刷新',
     dsRecords: '记录',
-    copy: '复制'
+    copy: '复制',
+    publishDSToParent: '发布 DS 到父 Zone',
+    publishDSSuccess: 'DS 记录已成功发布到父 Zone',
+    publishDSFailed: '发布 DS 记录失败'
   },
   page: {
     lastUpdated: '最后更新',

@@ -663,7 +663,7 @@ func (h *DomainHandler) EnableDomainDNSSEC(c *gin.Context) {
 	}
 
 	var domain models.Domain
-	if err := h.db.First(&domain, c.Param("id")).Error; err != nil {
+	if err := h.db.Preload("RootDomain").First(&domain, c.Param("id")).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Domain not found"})
 		return
 	}
@@ -671,6 +671,28 @@ func (h *DomainHandler) EnableDomainDNSSEC(c *gin.Context) {
 	if domain.UserID != userID {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
 		return
+	}
+
+	// Ensure zone exists in PowerDNS before enabling DNSSEC
+	if _, err := h.pdns.GetZone(domain.FullDomain); err != nil {
+		// Zone doesn't exist — create it using the domain's nameservers
+		var nameservers []string
+		if domain.Nameservers != "" {
+			_ = json.Unmarshal([]byte(domain.Nameservers), &nameservers)
+		}
+		if len(nameservers) == 0 && domain.RootDomain != nil && domain.RootDomain.Nameservers != "" {
+			_ = json.Unmarshal([]byte(domain.RootDomain.Nameservers), &nameservers)
+		}
+		if len(nameservers) == 0 {
+			nameservers = []string{"ns1.example.com", "ns2.example.com"}
+		}
+		if createErr := h.pdns.CreateZone(domain.FullDomain, ensureCanonicalNS(nameservers)); createErr != nil {
+			// Ignore "already exists" errors
+			if !strings.Contains(createErr.Error(), "already exists") && !strings.Contains(createErr.Error(), "422") {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create DNS zone: " + createErr.Error()})
+				return
+			}
+		}
 	}
 
 	if err := h.pdns.EnableDNSSEC(domain.FullDomain); err != nil {
@@ -716,7 +738,7 @@ func (h *DomainHandler) DisableDomainDNSSEC(c *gin.Context) {
 	}
 
 	var domain models.Domain
-	if err := h.db.First(&domain, c.Param("id")).Error; err != nil {
+	if err := h.db.Preload("RootDomain").First(&domain, c.Param("id")).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Domain not found"})
 		return
 	}
@@ -731,10 +753,56 @@ func (h *DomainHandler) DisableDomainDNSSEC(c *gin.Context) {
 		return
 	}
 
+	// Remove DS records from parent zone if it's managed by us
+	if domain.RootDomain != nil {
+		_ = h.pdns.UnpublishDSFromParentZone(domain.FullDomain, domain.RootDomain.Domain)
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"message": "DNSSEC disabled successfully",
 		"enabled": false,
 		"keys":    []interface{}{},
+	})
+}
+
+// PublishDomainDSRecords 将子域名的 DS 记录发布到父 zone
+// @Summary 发布 DS 记录到父 zone
+// @Tags Domain
+// @Produce json
+// @Param id path int true "域名 ID"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/domains/{id}/dnssec/publish-ds [post]
+// @Security Bearer
+func (h *DomainHandler) PublishDomainDSRecords(c *gin.Context) {
+	userID, exists := middleware.GetUserID(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	var domain models.Domain
+	if err := h.db.Preload("RootDomain").First(&domain, c.Param("id")).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Domain not found"})
+		return
+	}
+
+	if domain.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	if domain.RootDomain == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Parent zone not found"})
+		return
+	}
+
+	if err := h.pdns.PublishDSToParentZone(domain.FullDomain, domain.RootDomain.Domain); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to publish DS records: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": fmt.Sprintf("DS records published to %s successfully", domain.RootDomain.Domain),
 	})
 }
 

@@ -86,6 +86,18 @@
                   </svg>
                 </button>
               </div>
+              <!-- Publish DS to parent zone -->
+              <button
+                @click="publishDS"
+                class="btn btn-outline btn-xs mt-2 gap-1"
+                :disabled="dnssec.publishingDS"
+              >
+                <span v-if="dnssec.publishingDS" class="loading loading-spinner loading-xs"></span>
+                <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                </svg>
+                {{ $t('dnsManagement.publishDSToParent') }}
+              </button>
             </div>
           </div>
         </div>
@@ -350,6 +362,7 @@ const dnssec = ref({
   enabled: false,
   keys: [],
   loading: false,
+  publishingDS: false,
 })
 
 const form = ref({
@@ -428,6 +441,18 @@ const copyText = async (text) => {
     toast.success(t('dnsManagement.copied'))
   } catch {
     toast.error(t('dnsManagement.copyFailed'))
+  }
+}
+
+const publishDS = async () => {
+  dnssec.value.publishingDS = true
+  try {
+    const response = await axios.post(`/api/domains/${domainId}/dnssec/publish-ds`)
+    toast.success(response.data.message || t('dnsManagement.publishDSSuccess'))
+  } catch (error) {
+    toast.error(error.response?.data?.error || t('dnsManagement.publishDSFailed'))
+  } finally {
+    dnssec.value.publishingDS = false
   }
 }
 

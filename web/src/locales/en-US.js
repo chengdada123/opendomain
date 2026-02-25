@@ -853,7 +853,10 @@ export default {
     dnssecOperationFailed: 'DNSSEC operation failed',
     dnssecNoKeys: 'No DNSSEC keys found, try refreshing',
     dsRecords: 'Records',
-    copy: 'Copy'
+    copy: 'Copy',
+    publishDSToParent: 'Publish DS to Parent Zone',
+    publishDSSuccess: 'DS records published to parent zone successfully',
+    publishDSFailed: 'Failed to publish DS records'
   },
   page: {
     lastUpdated: 'Last Updated',
