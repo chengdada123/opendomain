@@ -967,6 +967,7 @@ func (h *FOSSBillingSyncHandler) DeletePendingDomain(c *gin.Context) {
 // @Produce json
 // @Param page query int false "页码" default(1)
 // @Param per_page query int false "每页数量" default(50)
+// @Param search query string false "搜索关键词"
 // @Success 200 {object} map[string]interface{}
 // @Router /api/public/pending-domains [get]
 func (h *FOSSBillingSyncHandler) GetPublicPendingDomains(c *gin.Context) {
@@ -986,20 +987,33 @@ func (h *FOSSBillingSyncHandler) GetPublicPendingDomains(c *gin.Context) {
 		}
 	}
 
+	search := c.Query("search")
+
 	// 计算偏移量
 	offset := (page - 1) * perPage
 
+	// 构建基础查询
+	baseQuery := h.db.Model(&models.PendingDomain{}).Where("deleted_at IS NULL")
+	if search != "" {
+		like := "%" + search + "%"
+		baseQuery = baseQuery.Where("full_domain LIKE ? OR subdomain LIKE ?", like, like)
+	}
+
 	// 获取总数
 	var total int64
-	if err := h.db.Model(&models.PendingDomain{}).Where("deleted_at IS NULL").Count(&total).Error; err != nil {
+	if err := baseQuery.Count(&total).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count pending domains"})
 		return
 	}
 
 	// 获取分页数据
 	var pendingDomains []models.PendingDomain
-	if err := h.db.Preload("RootDomain").
-		Where("deleted_at IS NULL").
+	dataQuery := h.db.Preload("RootDomain").Where("deleted_at IS NULL")
+	if search != "" {
+		like := "%" + search + "%"
+		dataQuery = dataQuery.Where("full_domain LIKE ? OR subdomain LIKE ?", like, like)
+	}
+	if err := dataQuery.
 		Order("created_at DESC").
 		Limit(perPage).
 		Offset(offset).

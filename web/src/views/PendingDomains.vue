@@ -50,7 +50,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="domain in filteredDomains" :key="domain.id">
+          <tr v-for="domain in domains" :key="domain.id">
             <td class="font-mono">{{ domain.full_domain }}</td>
             <td>{{ domain.root_domain?.domain || 'N/A' }}</td>
             <td>
@@ -80,7 +80,7 @@
               <span v-else class="opacity-50">-</span>
             </td>
           </tr>
-          <tr v-if="filteredDomains.length === 0">
+          <tr v-if="domains.length === 0">
             <td colspan="5" class="text-center py-8 opacity-50">
               {{ $t('pendingDomains.noData') }}
             </td>
@@ -121,7 +121,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import axios from '../utils/axios'
 import { useToast } from '../composables/useToast'
@@ -139,27 +139,22 @@ const pagination = ref({
   total_pages: 0
 })
 
+let searchTimer = null
+
 const healthyCount = computed(() => domains.value.filter(d => d.status === 'healthy').length)
 const unhealthyCount = computed(() => domains.value.filter(d => d.status === 'unhealthy').length)
-
-const filteredDomains = computed(() => {
-  if (!searchQuery.value) return domains.value
-  const query = searchQuery.value.toLowerCase()
-  return domains.value.filter(d =>
-    d.full_domain.toLowerCase().includes(query) ||
-    d.subdomain.toLowerCase().includes(query)
-  )
-})
 
 const fetchDomains = async (page = 1) => {
   loading.value = true
   try {
-    const res = await axios.get('/api/public/pending-domains', {
-      params: {
-        page: page,
-        per_page: pagination.value.per_page
-      }
-    })
+    const params = {
+      page: page,
+      per_page: pagination.value.per_page
+    }
+    if (searchQuery.value) {
+      params.search = searchQuery.value
+    }
+    const res = await axios.get('/api/public/pending-domains', { params })
     domains.value = res.data.pending_domains || []
     if (res.data.pagination) {
       pagination.value = res.data.pagination
@@ -170,6 +165,13 @@ const fetchDomains = async (page = 1) => {
     loading.value = false
   }
 }
+
+watch(searchQuery, () => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    fetchDomains(1)
+  }, 400)
+})
 
 const changePage = (page) => {
   if (page >= 1 && page <= pagination.value.total_pages) {
