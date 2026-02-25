@@ -127,6 +127,9 @@ func Setup(db *gorm.DB, rdb *redis.Client, cfg *config.Config) *gin.Engine {
 				domains.PUT("/:id/nameservers", domainHandler.ModifyNameservers)
 				domains.POST("/:id/renew", domainHandler.RenewDomain)
 				domains.POST("/:id/transfer", domainHandler.TransferDomain)
+				domains.GET("/:id/dnssec", domainHandler.GetDomainDNSSEC)
+				domains.POST("/:id/dnssec/enable", domainHandler.EnableDomainDNSSEC)
+				domains.POST("/:id/dnssec/disable", domainHandler.DisableDomainDNSSEC)
 			}
 
 			// 域名扫描记录

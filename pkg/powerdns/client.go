@@ -270,6 +270,86 @@ func (c *Client) doRequest(method, url string, body []byte) ([]byte, error) {
 	return respBody, nil
 }
 
+// CryptoKey represents a DNSSEC cryptographic key returned by PowerDNS
+type CryptoKey struct {
+	ID        int      `json:"id"`
+	KeyType   string   `json:"keytype"` // ksk, zsk, csk
+	Active    bool     `json:"active"`
+	Published bool     `json:"published"`
+	DNSKey    string   `json:"dnskey"`
+	DS        []string `json:"ds"`
+	Flags     int      `json:"flags"`
+	Algorithm string   `json:"algorithm"`
+	Bits      int      `json:"bits"`
+}
+
+// EnableDNSSEC enables DNSSEC for a zone and creates a CSK if none exist, then rectifies
+func (c *Client) EnableDNSSEC(domain string) error {
+	zoneName := ensureTrailingDot(domain)
+	url := fmt.Sprintf("%s/api/v1/servers/%s/zones/%s", c.BaseURL, c.ServerID, zoneName)
+	body, err := json.Marshal(map[string]interface{}{"dnssec": true})
+	if err != nil {
+		return fmt.Errorf("failed to marshal request: %w", err)
+	}
+	if _, err = c.doRequest("PUT", url, body); err != nil {
+		return err
+	}
+
+	// If no keys exist yet, create a CSK
+	keys, err := c.GetCryptoKeys(domain)
+	if err == nil && len(keys) == 0 {
+		keyURL := fmt.Sprintf("%s/api/v1/servers/%s/zones/%s/cryptokeys", c.BaseURL, c.ServerID, zoneName)
+		keyBody, _ := json.Marshal(map[string]interface{}{
+			"keytype":   "csk",
+			"active":    true,
+			"published": true,
+			"algorithm": "ECDSAP256SHA256",
+		})
+		if _, keyErr := c.doRequest("POST", keyURL, keyBody); keyErr != nil {
+			return fmt.Errorf("failed to create DNSSEC key: %w", keyErr)
+		}
+	}
+
+	// Rectify the zone to compute NSEC/NSEC3 records
+	_ = c.RectifyZone(domain)
+	return nil
+}
+
+// DisableDNSSEC disables DNSSEC for a zone
+func (c *Client) DisableDNSSEC(domain string) error {
+	zoneName := ensureTrailingDot(domain)
+	url := fmt.Sprintf("%s/api/v1/servers/%s/zones/%s", c.BaseURL, c.ServerID, zoneName)
+	body, err := json.Marshal(map[string]interface{}{"dnssec": false})
+	if err != nil {
+		return fmt.Errorf("failed to marshal request: %w", err)
+	}
+	_, err = c.doRequest("PUT", url, body)
+	return err
+}
+
+// GetCryptoKeys returns all DNSSEC crypto keys for a zone
+func (c *Client) GetCryptoKeys(domain string) ([]CryptoKey, error) {
+	zoneName := ensureTrailingDot(domain)
+	url := fmt.Sprintf("%s/api/v1/servers/%s/zones/%s/cryptokeys", c.BaseURL, c.ServerID, zoneName)
+	respBody, err := c.doRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	var keys []CryptoKey
+	if err := json.Unmarshal(respBody, &keys); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal crypto keys: %w", err)
+	}
+	return keys, nil
+}
+
+// RectifyZone computes NSEC/NSEC3 records and DNSSEC signatures for a zone
+func (c *Client) RectifyZone(domain string) error {
+	zoneName := ensureTrailingDot(domain)
+	url := fmt.Sprintf("%s/api/v1/servers/%s/zones/%s/rectify", c.BaseURL, c.ServerID, zoneName)
+	_, err := c.doRequest("PUT", url, nil)
+	return err
+}
+
 // ensureTrailingDot 确保域名以点结尾
 func ensureTrailingDot(s string) string {
 	if len(s) == 0 {

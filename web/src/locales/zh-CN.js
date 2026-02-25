@@ -841,7 +841,19 @@ export default {
     copied: '已复制！',
     copyFailed: '复制失败',
     aliasHintTitle: 'ALIAS（CNAME 拉平）：',
-    aliasHint: "在根域（{'@'}）处使用，将 apex 域名指向一个主机名。PowerDNS 会自动解析目标并返回 A/AAAA 记录——与 CNAME 不同，ALIAS 允许在根域使用。"
+    aliasHint: "在根域（{'@'}）处使用，将 apex 域名指向一个主机名。PowerDNS 会自动解析目标并返回 A/AAAA 记录——与 CNAME 不同，ALIAS 允许在根域使用。",
+    dnssecDesc: '为此域名启用 DNSSEC，防止 DNS 欺骗和缓存污染',
+    dnssecEnabled: '已启用',
+    dnssecDisabled: '未启用',
+    enableDNSSEC: '启用 DNSSEC',
+    disableDNSSEC: '禁用 DNSSEC',
+    disableDNSSECConfirm: '禁用 DNSSEC 后，注册商侧的 DS 记录也应一并删除，否则域名可能无法解析。确认禁用？',
+    dnssecEnabledSuccess: 'DNSSEC 已成功启用',
+    dnssecDisabledSuccess: 'DNSSEC 已成功禁用',
+    dnssecOperationFailed: 'DNSSEC 操作失败',
+    dnssecNoKeys: '未找到 DNSSEC 密钥，请稍后刷新',
+    dsRecords: '记录',
+    copy: '复制'
   },
   page: {
     lastUpdated: '最后更新',

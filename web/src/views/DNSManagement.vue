@@ -23,6 +23,79 @@
       </div>
     </div>
 
+    <!-- DNSSEC Panel -->
+    <div class="card bg-base-100 shadow-xl border border-base-300">
+      <div class="card-body">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-full flex items-center justify-center" :class="dnssec.enabled ? 'bg-success/20' : 'bg-base-300'">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" :class="dnssec.enabled ? 'text-success' : 'opacity-40'" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+            </div>
+            <div>
+              <h2 class="font-bold text-lg">DNSSEC</h2>
+              <p class="text-sm opacity-60">{{ $t('dnsManagement.dnssecDesc') }}</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-3">
+            <span class="badge" :class="dnssec.enabled ? 'badge-success' : 'badge-ghost'">
+              {{ dnssec.enabled ? $t('dnsManagement.dnssecEnabled') : $t('dnsManagement.dnssecDisabled') }}
+            </span>
+            <button
+              @click="toggleDNSSEC"
+              class="btn btn-sm"
+              :class="dnssec.enabled ? 'btn-error' : 'btn-success'"
+              :disabled="dnssec.loading"
+            >
+              <span v-if="dnssec.loading" class="loading loading-spinner loading-xs"></span>
+              <span v-else>{{ dnssec.enabled ? $t('dnsManagement.disableDNSSEC') : $t('dnsManagement.enableDNSSEC') }}</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Keys Section -->
+        <div v-if="dnssec.enabled && dnssec.keys.length > 0" class="mt-4 space-y-4">
+          <div v-for="key in dnssec.keys" :key="key.id" class="bg-base-200 rounded-lg p-4 space-y-3">
+            <div class="flex items-center gap-2">
+              <span class="badge badge-primary badge-sm">{{ key.keytype.toUpperCase() }}</span>
+              <span class="text-sm opacity-60">{{ key.algorithm }} / {{ key.bits }} bits</span>
+            </div>
+
+            <!-- DNSKEY -->
+            <div>
+              <div class="text-xs font-semibold uppercase tracking-wide opacity-50 mb-1">DNSKEY</div>
+              <div class="flex items-center gap-2">
+                <code class="bg-base-300 px-3 py-2 rounded text-xs font-mono break-all flex-1">{{ key.dnskey }}</code>
+                <button @click="copyText(key.dnskey)" class="btn btn-ghost btn-xs btn-square flex-shrink-0" :title="$t('dnsManagement.copy')">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- DS Records -->
+            <div v-if="key.ds && key.ds.length > 0">
+              <div class="text-xs font-semibold uppercase tracking-wide opacity-50 mb-1">DS {{ $t('dnsManagement.dsRecords') }}</div>
+              <div v-for="(ds, idx) in key.ds" :key="idx" class="flex items-center gap-2 mb-1">
+                <code class="bg-base-300 px-3 py-2 rounded text-xs font-mono break-all flex-1">{{ ds }}</code>
+                <button @click="copyText(ds)" class="btn btn-ghost btn-xs btn-square flex-shrink-0" :title="$t('dnsManagement.copy')">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-else-if="dnssec.enabled && dnssec.keys.length === 0 && !dnssec.loading" class="mt-3 text-sm opacity-60">
+          {{ $t('dnsManagement.dnssecNoKeys') }}
+        </div>
+      </div>
+    </div>
+
     <!-- DNS Records Table -->
     <div v-if="loading" class="flex justify-center py-12">
       <span class="loading loading-spinner loading-lg"></span>
@@ -273,6 +346,12 @@ const editingRecord = ref(null)
 const currentError = ref('')
 const errorCopied = ref(false)
 
+const dnssec = ref({
+  enabled: false,
+  keys: [],
+  loading: false,
+})
+
 const form = ref({
   name: '@',
   type: 'A',
@@ -284,7 +363,7 @@ const form = ref({
 
 onMounted(async () => {
   await fetchDomain()
-  await fetchRecords()
+  await Promise.all([fetchRecords(), fetchDNSSEC()])
 })
 
 const fetchDomain = async () => {
@@ -305,6 +384,50 @@ const fetchRecords = async () => {
     console.error('Failed to fetch DNS records:', error)
   } finally {
     loading.value = false
+  }
+}
+
+const fetchDNSSEC = async () => {
+  try {
+    const response = await axios.get(`/api/domains/${domainId}/dnssec`)
+    dnssec.value.enabled = response.data.enabled
+    dnssec.value.keys = response.data.keys || []
+  } catch (error) {
+    console.error('Failed to fetch DNSSEC status:', error)
+  }
+}
+
+const toggleDNSSEC = async () => {
+  dnssec.value.loading = true
+  try {
+    if (dnssec.value.enabled) {
+      if (!confirm(t('dnsManagement.disableDNSSECConfirm'))) {
+        dnssec.value.loading = false
+        return
+      }
+      const response = await axios.post(`/api/domains/${domainId}/dnssec/disable`)
+      dnssec.value.enabled = response.data.enabled
+      dnssec.value.keys = response.data.keys || []
+      toast.success(t('dnsManagement.dnssecDisabledSuccess'))
+    } else {
+      const response = await axios.post(`/api/domains/${domainId}/dnssec/enable`)
+      dnssec.value.enabled = response.data.enabled
+      dnssec.value.keys = response.data.keys || []
+      toast.success(t('dnsManagement.dnssecEnabledSuccess'))
+    }
+  } catch (error) {
+    toast.error(error.response?.data?.error || t('dnsManagement.dnssecOperationFailed'))
+  } finally {
+    dnssec.value.loading = false
+  }
+}
+
+const copyText = async (text) => {
+  try {
+    await navigator.clipboard.writeText(text)
+    toast.success(t('dnsManagement.copied'))
+  } catch {
+    toast.error(t('dnsManagement.copyFailed'))
   }
 }
 

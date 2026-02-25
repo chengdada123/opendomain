@@ -590,6 +590,154 @@ func (h *DomainHandler) GetDomain(c *gin.Context) {
 	c.JSON(http.StatusOK, domain.ToResponse())
 }
 
+// GetDomainDNSSEC 获取域名 DNSSEC 状态和密钥信息
+// @Summary 获取域名 DNSSEC 状态
+// @Tags Domain
+// @Produce json
+// @Param id path int true "域名 ID"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/domains/{id}/dnssec [get]
+// @Security Bearer
+func (h *DomainHandler) GetDomainDNSSEC(c *gin.Context) {
+	userID, exists := middleware.GetUserID(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	var domain models.Domain
+	if err := h.db.Preload("RootDomain").First(&domain, c.Param("id")).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Domain not found"})
+		return
+	}
+
+	if domain.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	zone, err := h.pdns.GetZone(domain.FullDomain)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"enabled": false, "keys": []interface{}{}})
+		return
+	}
+
+	keys := []interface{}{}
+	if zone.DNSsec {
+		cryptoKeys, err := h.pdns.GetCryptoKeys(domain.FullDomain)
+		if err == nil {
+			for _, k := range cryptoKeys {
+				if k.Active && k.Published {
+					keys = append(keys, gin.H{
+						"id":        k.ID,
+						"keytype":   k.KeyType,
+						"algorithm": k.Algorithm,
+						"bits":      k.Bits,
+						"dnskey":    k.DNSKey,
+						"ds":        k.DS,
+					})
+				}
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"enabled": zone.DNSsec,
+		"keys":    keys,
+	})
+}
+
+// EnableDomainDNSSEC 为域名启用 DNSSEC
+// @Summary 启用域名 DNSSEC
+// @Tags Domain
+// @Produce json
+// @Param id path int true "域名 ID"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/domains/{id}/dnssec/enable [post]
+// @Security Bearer
+func (h *DomainHandler) EnableDomainDNSSEC(c *gin.Context) {
+	userID, exists := middleware.GetUserID(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	var domain models.Domain
+	if err := h.db.First(&domain, c.Param("id")).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Domain not found"})
+		return
+	}
+
+	if domain.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	if err := h.pdns.EnableDNSSEC(domain.FullDomain); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to enable DNSSEC: " + err.Error()})
+		return
+	}
+
+	cryptoKeys, _ := h.pdns.GetCryptoKeys(domain.FullDomain)
+	keys := []interface{}{}
+	for _, k := range cryptoKeys {
+		if k.Active && k.Published {
+			keys = append(keys, gin.H{
+				"id":        k.ID,
+				"keytype":   k.KeyType,
+				"algorithm": k.Algorithm,
+				"bits":      k.Bits,
+				"dnskey":    k.DNSKey,
+				"ds":        k.DS,
+			})
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "DNSSEC enabled successfully",
+		"enabled": true,
+		"keys":    keys,
+	})
+}
+
+// DisableDomainDNSSEC 为域名禁用 DNSSEC
+// @Summary 禁用域名 DNSSEC
+// @Tags Domain
+// @Produce json
+// @Param id path int true "域名 ID"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/domains/{id}/dnssec/disable [post]
+// @Security Bearer
+func (h *DomainHandler) DisableDomainDNSSEC(c *gin.Context) {
+	userID, exists := middleware.GetUserID(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	var domain models.Domain
+	if err := h.db.First(&domain, c.Param("id")).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Domain not found"})
+		return
+	}
+
+	if domain.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	if err := h.pdns.DisableDNSSEC(domain.FullDomain); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to disable DNSSEC: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "DNSSEC disabled successfully",
+		"enabled": false,
+		"keys":    []interface{}{},
+	})
+}
+
 // DeleteDomain 删除域名
 func (h *DomainHandler) DeleteDomain(c *gin.Context) {
 	userID, exists := middleware.GetUserID(c)

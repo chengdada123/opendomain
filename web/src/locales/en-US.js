@@ -841,7 +841,19 @@ export default {
     copied: 'Copied!',
     copyFailed: 'Failed to copy',
     aliasHintTitle: 'ALIAS (CNAME Flattening):',
-    aliasHint: "Use this at the zone root ({'@'}) to point your apex domain to a hostname. PowerDNS resolves the target and returns A/AAAA records transparently — unlike CNAME, it is allowed at the root."
+    aliasHint: "Use this at the zone root ({'@'}) to point your apex domain to a hostname. PowerDNS resolves the target and returns A/AAAA records transparently — unlike CNAME, it is allowed at the root.",
+    dnssecDesc: 'Enable DNSSEC to protect against DNS spoofing and cache poisoning',
+    dnssecEnabled: 'Enabled',
+    dnssecDisabled: 'Disabled',
+    enableDNSSEC: 'Enable DNSSEC',
+    disableDNSSEC: 'Disable DNSSEC',
+    disableDNSSECConfirm: 'Disabling DNSSEC will break resolution if DS records are still present at your registrar. Make sure to remove them first. Continue?',
+    dnssecEnabledSuccess: 'DNSSEC enabled successfully',
+    dnssecDisabledSuccess: 'DNSSEC disabled successfully',
+    dnssecOperationFailed: 'DNSSEC operation failed',
+    dnssecNoKeys: 'No DNSSEC keys found, try refreshing',
+    dsRecords: 'Records',
+    copy: 'Copy'
   },
   page: {
     lastUpdated: 'Last Updated',
