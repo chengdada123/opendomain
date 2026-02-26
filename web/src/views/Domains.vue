@@ -130,9 +130,22 @@
                 {{ domain.dns_synced ? $t('domains.yes') : $t('domains.no') }}
               </div>
             </div>
+
           </div>
 
           <div v-if="domain.status !== 'suspended'" class="card-actions justify-end mt-4 flex-wrap gap-2">
+            <button
+              v-if="domain.status === 'active'"
+              class="btn btn-sm"
+              :class="cpAccountByDomain[domain.id] ? 'btn-success' : 'btn-outline btn-success'"
+              @click="openCpHosting(domain)"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
+              </svg>
+              {{ cpAccountByDomain[domain.id] ? $t('domains.cpViewHosting') : $t('domains.cpApplyHosting') }}
+            </button>
+
             <div class="tooltip" :data-tip="isUsingDefaultNS(domain) ? $t('domains.manageDNS') : $t('domains.dnsTooltip')">
               <button
                 class="btn btn-sm btn-primary"
@@ -186,6 +199,106 @@
         </div>
       </div>
     </div>
+
+    <!-- CyberPanel Hosting Modal -->
+    <dialog :class="{ 'modal': true, 'modal-open': showCpModal }">
+      <div class="modal-box max-w-lg" v-if="cpModalDomain">
+        <h3 class="font-bold text-2xl mb-1">{{ $t('domains.cpHostingTitle') }}</h3>
+        <p class="text-sm opacity-60 mb-4 font-mono">{{ cpModalDomain.full_domain }}</p>
+
+        <!-- Existing account view -->
+        <div v-if="cpAccountByDomain[cpModalDomain.id]" class="space-y-4">
+          <div class="grid grid-cols-2 gap-3 text-sm">
+            <div class="bg-base-200 rounded-lg p-3">
+              <p class="opacity-60 text-xs mb-1">{{ $t('domains.cpHostingStatus') }}</p>
+              <span class="inline-block px-2 py-0.5 rounded text-xs font-medium" :class="{
+                'bg-green-100 text-green-800': cpAccountByDomain[cpModalDomain.id].status === 'active',
+                'bg-blue-100 text-blue-800': cpAccountByDomain[cpModalDomain.id].status === 'pending',
+                'bg-amber-100 text-amber-800': cpAccountByDomain[cpModalDomain.id].status === 'suspended',
+                'bg-red-100 text-red-800': cpAccountByDomain[cpModalDomain.id].status === 'terminated',
+              }">{{ cpAccountByDomain[cpModalDomain.id].status }}</span>
+            </div>
+            <div class="bg-base-200 rounded-lg p-3">
+              <p class="opacity-60 text-xs mb-1">{{ $t('domains.cpHostingServer') }}</p>
+              <p class="font-medium">{{ cpAccountByDomain[cpModalDomain.id].server?.name || '-' }}</p>
+            </div>
+            <div class="bg-base-200 rounded-lg p-3">
+              <p class="opacity-60 text-xs mb-1">{{ $t('domains.cpHostingUsername') }}</p>
+              <p class="font-mono font-bold">{{ cpAccountByDomain[cpModalDomain.id].cp_username }}</p>
+            </div>
+            <div class="bg-base-200 rounded-lg p-3">
+              <p class="opacity-60 text-xs mb-1">{{ $t('domains.cpHostingPassword') }}</p>
+              <div class="flex items-center gap-2">
+                <p class="font-mono font-bold">{{ showCpPassword ? cpAccountByDomain[cpModalDomain.id].cp_password : '••••••••' }}</p>
+                <button class="btn btn-xs btn-ghost" @click="showCpPassword = !showCpPassword">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path v-if="showCpPassword" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                    <path v-else stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="cpAccountByDomain[cpModalDomain.id].error_msg" class="alert alert-warning text-sm">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            {{ cpAccountByDomain[cpModalDomain.id].error_msg }}
+          </div>
+
+          <div class="modal-action">
+            <button @click="showCpModal = false; showCpPassword = false" class="btn btn-ghost">{{ $t('common.close') }}</button>
+            <button @click="confirmDeleteCpAccount" class="btn btn-error" :disabled="cpSubmitting">
+              <span v-if="cpSubmitting" class="loading loading-spinner loading-sm"></span>
+              {{ $t('domains.cpHostingDelete') }}
+            </button>
+          </div>
+        </div>
+
+        <!-- Apply form -->
+        <div v-else class="space-y-4">
+          <p class="text-sm opacity-70">{{ $t('domains.cpHostingApply') }}</p>
+          <div class="form-control">
+            <label class="label"><span class="label-text">{{ $t('domains.cpHostingUsername') }} *</span></label>
+            <input v-model="cpForm.cp_username" type="text" class="input input-bordered" placeholder="e.g. john" />
+          </div>
+          <div class="form-control">
+            <label class="label">
+              <span class="label-text">{{ $t('domains.cpHostingPassword') }} *</span>
+              <span class="label-text-alt opacity-60">{{ $t('domains.cpHostingPasswordHint') }}</span>
+            </label>
+            <input v-model="cpForm.cp_password" type="password" class="input input-bordered" />
+          </div>
+
+          <div v-if="cpFormError" class="alert alert-error text-sm">{{ cpFormError }}</div>
+
+          <div class="modal-action">
+            <button @click="showCpModal = false" class="btn btn-ghost">{{ $t('common.cancel') }}</button>
+            <button @click="createCpAccount" class="btn btn-primary" :disabled="cpSubmitting">
+              <span v-if="cpSubmitting" class="loading loading-spinner loading-sm"></span>
+              {{ $t('common.submit') }}
+            </button>
+          </div>
+        </div>
+      </div>
+      <form method="dialog" class="modal-backdrop" @click="showCpModal = false; showCpPassword = false"></form>
+    </dialog>
+
+    <!-- CyberPanel Delete Confirm Modal -->
+    <dialog :class="{ 'modal': true, 'modal-open': showCpDeleteConfirm }">
+      <div class="modal-box">
+        <h3 class="font-bold text-lg">{{ $t('domains.cpHostingDelete') }}</h3>
+        <p class="py-4 text-sm">{{ $t('domains.cpHostingDeleteConfirm') }}</p>
+        <div class="modal-action">
+          <button @click="showCpDeleteConfirm = false" class="btn btn-ghost">{{ $t('common.cancel') }}</button>
+          <button @click="deleteCpAccount" class="btn btn-error" :disabled="cpSubmitting">
+            <span v-if="cpSubmitting" class="loading loading-spinner loading-sm"></span>
+            {{ $t('admin.delete') }}
+          </button>
+        </div>
+      </div>
+    </dialog>
 
     <!-- Modify Nameservers Modal -->
     <dialog :class="{ 'modal': true, 'modal-open': showNSModal }">
@@ -911,6 +1024,87 @@ const scanPage = ref(1)
 const scanPageSize = ref(10)
 const scanTotalPages = ref(1)
 
+// CyberPanel Hosting
+const cpAccounts = ref([])
+const showCpModal = ref(false)
+const showCpDeleteConfirm = ref(false)
+const showCpPassword = ref(false)
+const cpModalDomain = ref(null)
+const cpSubmitting = ref(false)
+const cpFormError = ref('')
+const cpForm = ref({ cp_username: '', cp_password: '' })
+
+const cpAccountByDomain = computed(() => {
+  const map = {}
+  for (const acc of cpAccounts.value) {
+    if (acc.status !== 'terminated') {
+      map[acc.domain_id] = acc
+    }
+  }
+  return map
+})
+
+const fetchCpAccounts = async () => {
+  try {
+    const res = await axios.get('/api/cyberpanel/accounts')
+    cpAccounts.value = res.data.accounts || []
+  } catch (e) {
+    // silently ignore — feature may not be configured
+  }
+}
+
+const openCpHosting = (domain) => {
+  cpModalDomain.value = domain
+  cpForm.value = { cp_username: '', cp_password: '' }
+  cpFormError.value = ''
+  showCpPassword.value = false
+  showCpModal.value = true
+}
+
+const createCpAccount = async () => {
+  if (!cpForm.value.cp_username || !cpForm.value.cp_password) {
+    cpFormError.value = t('domains.cpHostingPasswordHint')
+    return
+  }
+  cpSubmitting.value = true
+  cpFormError.value = ''
+  try {
+    await axios.post('/api/cyberpanel/accounts', {
+      domain_id: cpModalDomain.value.id,
+      cp_username: cpForm.value.cp_username,
+      cp_password: cpForm.value.cp_password,
+    })
+    toast.success(t('domains.cpHostingCreated'))
+    showCpModal.value = false
+    await fetchCpAccounts()
+  } catch (e) {
+    cpFormError.value = e.response?.data?.error || 'Failed'
+  } finally {
+    cpSubmitting.value = false
+  }
+}
+
+const confirmDeleteCpAccount = () => {
+  showCpDeleteConfirm.value = true
+}
+
+const deleteCpAccount = async () => {
+  const acc = cpAccountByDomain.value[cpModalDomain.value?.id]
+  if (!acc) return
+  cpSubmitting.value = true
+  try {
+    await axios.delete(`/api/cyberpanel/accounts/${acc.id}`)
+    toast.success(t('domains.cpHostingDeleted'))
+    showCpDeleteConfirm.value = false
+    showCpModal.value = false
+    await fetchCpAccounts()
+  } catch (e) {
+    toast.error(e.response?.data?.error || 'Failed')
+  } finally {
+    cpSubmitting.value = false
+  }
+}
+
 // Watch renewYears changes to reset coupon
 watch(renewYears, () => {
   // Reset coupon state when years change
@@ -929,6 +1123,7 @@ watch(renewIsLifetime, () => {
 
 onMounted(async () => {
   await fetchDomains()
+  await fetchCpAccounts()
 })
 
 const fetchDomains = async () => {

@@ -12,11 +12,11 @@
     <div role="tablist" class="tabs tabs-lifted tabs-lg">
       <button role="tab" class="tab" :class="{ 'tab-active': activeTab === 'servers' }" @click="activeTab = 'servers'">
         🖥 {{ $t('admin.cpServers') }}
-        <span class="badge badge-sm ml-2">{{ servers.length }}</span>
+        <span class="inline-flex items-center justify-center px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-200 text-gray-700 ml-2">{{ servers.length }}</span>
       </button>
       <button role="tab" class="tab" :class="{ 'tab-active': activeTab === 'accounts' }" @click="activeTab = 'accounts'; fetchAccounts()">
         👤 {{ $t('admin.cpAccounts') }}
-        <span class="badge badge-sm ml-2">{{ accountTotal }}</span>
+        <span class="inline-flex items-center justify-center px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-200 text-gray-700 ml-2">{{ accountTotal }}</span>
       </button>
     </div>
 
@@ -60,7 +60,7 @@
             <tr v-for="server in servers" :key="server.id">
               <td>
                 <div class="font-semibold">{{ server.name }}</div>
-                <div v-if="server.is_default" class="badge badge-xs badge-primary mt-1">Default</div>
+                <div v-if="server.is_default" class="inline-block px-1.5 py-0.5 rounded text-xs font-semibold bg-blue-100 text-blue-700 mt-1">Default</div>
               </td>
               <td class="font-mono text-sm">{{ server.url }}</td>
               <td>{{ server.admin_user }}</td>
@@ -79,7 +79,7 @@
                 </div>
               </td>
               <td>
-                <span class="badge" :class="server.is_active ? 'badge-success' : 'badge-error'">
+                <span class="inline-block px-2 py-0.5 rounded text-xs font-medium" :class="server.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'">
                   {{ server.is_active ? $t('admin.active') : $t('admin.inactive') }}
                 </span>
               </td>
@@ -146,7 +146,7 @@
               <td>{{ acc.server?.name || acc.server_id }}</td>
               <td>{{ acc.user?.username || acc.user_id }}</td>
               <td>
-                <span class="badge badge-sm" :class="statusClass(acc.status)">{{ acc.status }}</span>
+                <span class="inline-block px-2 py-0.5 rounded text-xs font-medium" :class="statusClass(acc.status)">{{ acc.status }}</span>
                 <div v-if="acc.error_msg" class="tooltip" :data-tip="acc.error_msg">
                   <span class="text-error text-xs ml-1">⚠</span>
                 </div>
@@ -517,10 +517,10 @@ const terminateAccount = async () => {
 
 // ── Helpers ───────────────────────────────────────────────────────────
 const statusClass = (status) => ({
-  'badge-info': status === 'pending',
-  'badge-success': status === 'active',
-  'badge-warning': status === 'suspended',
-  'badge-error': status === 'terminated',
+  'bg-blue-100 text-blue-800': status === 'pending',
+  'bg-green-100 text-green-800': status === 'active',
+  'bg-amber-100 text-amber-800': status === 'suspended',
+  'bg-red-100 text-red-800': status === 'terminated',
 })
 
 const formatDate = (d) => {
