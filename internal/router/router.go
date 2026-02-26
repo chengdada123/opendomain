@@ -56,6 +56,8 @@ func Setup(db *gorm.DB, rdb *redis.Client, cfg *config.Config) *gin.Engine {
 		pageHandler := handler.NewPageHandler(db, cfg)
 		settingHandler := handler.NewSettingHandlerWithRedis(db, rdb, cfg)
 		fossBillingSyncHandler := handler.NewFOSSBillingSyncHandler(db, cfg)
+		cyberPanelHandler := handler.NewCyberPanelHandler(db, cfg)
+		domainHandler.SetCyberPanelHandler(cyberPanelHandler)
 
 		// 公开路由
 		public := api.Group("/public")
@@ -178,6 +180,14 @@ func Setup(db *gorm.DB, rdb *redis.Client, cfg *config.Config) *gin.Engine {
 				payments.POST("/:orderId/complete-free", paymentHandler.CompleteFreeOrder)
 				payments.GET("/:orderId/status", paymentHandler.QueryPaymentStatus)
 			}
+
+			// CyberPanel 主机账号（用户）
+			cp := protected.Group("/cyberpanel")
+			{
+				cp.GET("/accounts", cyberPanelHandler.ListMyAccounts)
+				cp.POST("/accounts", cyberPanelHandler.CreateAccount)
+				cp.DELETE("/accounts/:id", cyberPanelHandler.DeleteMyAccount)
+			}
 		}
 
 		// 管理员路由
@@ -237,6 +247,20 @@ func Setup(db *gorm.DB, rdb *redis.Client, cfg *config.Config) *gin.Engine {
 			admin.POST("/pages", pageHandler.CreatePage)
 			admin.PUT("/pages/:id", pageHandler.UpdatePage)
 			admin.DELETE("/pages/:id", pageHandler.DeletePage)
+
+			// CyberPanel 服务器管理
+			cpAdmin := admin.Group("/cyberpanel")
+			{
+				cpAdmin.GET("/servers", cyberPanelHandler.AdminListServers)
+				cpAdmin.POST("/servers", cyberPanelHandler.AdminCreateServer)
+				cpAdmin.PUT("/servers/:id", cyberPanelHandler.AdminUpdateServer)
+				cpAdmin.DELETE("/servers/:id", cyberPanelHandler.AdminDeleteServer)
+				cpAdmin.POST("/servers/:id/test", cyberPanelHandler.AdminTestServer)
+				cpAdmin.GET("/accounts", cyberPanelHandler.AdminListAccounts)
+				cpAdmin.POST("/accounts/:id/suspend", cyberPanelHandler.AdminSuspendAccount)
+				cpAdmin.POST("/accounts/:id/unsuspend", cyberPanelHandler.AdminUnsuspendAccount)
+				cpAdmin.DELETE("/accounts/:id", cyberPanelHandler.AdminTerminateAccount)
+			}
 		}
 	}
 

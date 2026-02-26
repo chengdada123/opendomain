@@ -197,6 +197,23 @@
         </div>
       </router-link>
 
+      <!-- CyberPanel Management -->
+      <router-link to="/admin/cyberpanel" class="card bg-base-100 shadow-xl hover:shadow-2xl transition-all duration-300 border border-base-300">
+        <div class="card-body">
+          <div class="flex items-center gap-4">
+            <div class="p-3 rounded-lg bg-cyan-500/10">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-cyan-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
+              </svg>
+            </div>
+            <div>
+              <h2 class="card-title">{{ $t('admin.cyberPanel') }}</h2>
+              <p class="text-sm opacity-70">{{ $t('admin.cyberPanelDesc') }}</p>
+            </div>
+          </div>
+        </div>
+      </router-link>
+
       <!-- System Settings -->
       <router-link to="/admin/settings" class="card bg-base-100 shadow-xl hover:shadow-2xl transition-all duration-300 border border-base-300">
         <div class="card-body">

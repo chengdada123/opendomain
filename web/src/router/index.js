@@ -173,6 +173,12 @@ const routes = [
     meta: { requiresAuth: true, requiresAdmin: true },
   },
   {
+    path: '/admin/cyberpanel',
+    name: 'AdminCyberPanel',
+    component: () => import('../views/AdminCyberPanel.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true },
+  },
+  {
     path: '/pages/:slug',
     name: 'PageView',
     component: () => import('../views/PageView.vue'),

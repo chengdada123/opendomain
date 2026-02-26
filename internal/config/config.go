@@ -21,17 +21,18 @@ type Config struct {
 	SiteName        string
 	SiteDescription string
 
-	Database DatabaseConfig
-	Redis    RedisConfig
-	JWT      JWTConfig
-	PowerDNS PowerDNSConfig
-	Email    EmailConfig
-	Scanner  ScannerConfig
-	Payment  PaymentConfig
-	DNS          DNSConfig
-	OAuth        OAuthConfig
-	Telegram     TelegramConfig
-	FOSSBilling  FOSSBillingConfig
+	Database    DatabaseConfig
+	Redis       RedisConfig
+	JWT         JWTConfig
+	PowerDNS    PowerDNSConfig
+	Email       EmailConfig
+	Scanner     ScannerConfig
+	Payment     PaymentConfig
+	DNS         DNSConfig
+	OAuth       OAuthConfig
+	Telegram    TelegramConfig
+	FOSSBilling FOSSBillingConfig
+	CyberPanel  CyberPanelConfig
 }
 
 type DatabaseConfig struct {
@@ -88,10 +89,10 @@ type DNSConfig struct {
 }
 
 type OAuthConfig struct {
-	GithubClientID     string
-	GithubClientSecret string
-	GoogleClientID     string
-	GoogleClientSecret string
+	GithubClientID      string
+	GithubClientSecret  string
+	GoogleClientID      string
+	GoogleClientSecret  string
 	NodelocClientID     string
 	NodelocClientSecret string
 }
@@ -102,9 +103,13 @@ type TelegramConfig struct {
 }
 
 type FOSSBillingConfig struct {
-	Enabled       bool
-	URL           string
-	AdminAPIKey   string
+	Enabled     bool
+	URL         string
+	AdminAPIKey string
+}
+
+type CyberPanelConfig struct {
+	EncryptionKey string
 }
 
 // Load 加载配置
@@ -190,10 +195,10 @@ func Load() (*Config, error) {
 		},
 
 		OAuth: OAuthConfig{
-			GithubClientID:     viper.GetString("GITHUB_CLIENT_ID"),
-			GithubClientSecret: viper.GetString("GITHUB_CLIENT_SECRET"),
-			GoogleClientID:     viper.GetString("GOOGLE_CLIENT_ID"),
-			GoogleClientSecret: viper.GetString("GOOGLE_CLIENT_SECRET"),
+			GithubClientID:      viper.GetString("GITHUB_CLIENT_ID"),
+			GithubClientSecret:  viper.GetString("GITHUB_CLIENT_SECRET"),
+			GoogleClientID:      viper.GetString("GOOGLE_CLIENT_ID"),
+			GoogleClientSecret:  viper.GetString("GOOGLE_CLIENT_SECRET"),
 			NodelocClientID:     viper.GetString("NODELOC_CLIENT_ID"),
 			NodelocClientSecret: viper.GetString("NODELOC_CLIENT_SECRET"),
 		},
@@ -207,6 +212,10 @@ func Load() (*Config, error) {
 			Enabled:     viper.GetBool("FOSSBILLING_ENABLED"),
 			URL:         viper.GetString("FOSSBILLING_URL"),
 			AdminAPIKey: viper.GetString("FOSSBILLING_ADMIN_API_KEY"),
+		},
+
+		CyberPanel: CyberPanelConfig{
+			EncryptionKey: viper.GetString("CYBERPANEL_ENCRYPTION_KEY"),
 		},
 	}
 
@@ -241,6 +250,7 @@ func setDefaults() {
 	viper.SetDefault("DEFAULT_NS2", "ns2.nodelook.com")
 
 	viper.SetDefault("FOSSBILLING_ENABLED", false)
+	viper.SetDefault("CYBERPANEL_ENCRYPTION_KEY", "change-this-secret-key-32-chars!")
 }
 
 // InitDatabase 初始化数据库连接

@@ -25,6 +25,10 @@ type SuspendHistoryResponse struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
+func (SuspendHistory) TableName() string {
+	return "suspend_history"
+}
+
 func (h *SuspendHistory) ToResponse() *SuspendHistoryResponse {
 	domainName := h.DomainName
 	if domainName == "" && h.Domain != nil {

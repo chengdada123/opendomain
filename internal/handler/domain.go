@@ -23,9 +23,10 @@ import (
 )
 
 type DomainHandler struct {
-	db   *gorm.DB
-	cfg  *config.Config
-	pdns *powerdns.Client
+	db        *gorm.DB
+	cfg       *config.Config
+	pdns      *powerdns.Client
+	cpHandler *CyberPanelHandler
 }
 
 func NewDomainHandler(db *gorm.DB, cfg *config.Config) *DomainHandler {
@@ -34,6 +35,11 @@ func NewDomainHandler(db *gorm.DB, cfg *config.Config) *DomainHandler {
 		cfg:  cfg,
 		pdns: powerdns.NewClient(cfg.PowerDNS.APIURL, cfg.PowerDNS.APIKey),
 	}
+}
+
+// SetCyberPanelHandler 注入 CyberPanel 处理器，实现域名联动
+func (h *DomainHandler) SetCyberPanelHandler(cp *CyberPanelHandler) {
+	h.cpHandler = cp
 }
 
 // ListRootDomains 获取根域名列表
@@ -140,10 +146,10 @@ func (h *DomainHandler) SearchDomain(c *gin.Context) {
 
 	if !available && !reserved {
 		response["domain_info"] = gin.H{
-			"status":        existingDomain.Status,
-			"registered_at": existingDomain.RegisteredAt,
-			"expires_at":    existingDomain.ExpiresAt,
-			"suspended_at":  existingDomain.SuspendedAt,
+			"status":         existingDomain.Status,
+			"registered_at":  existingDomain.RegisteredAt,
+			"expires_at":     existingDomain.ExpiresAt,
+			"suspended_at":   existingDomain.SuspendedAt,
 			"suspend_reason": existingDomain.SuspendReason,
 		}
 	}
@@ -198,16 +204,16 @@ func (h *DomainHandler) WhoisDomain(c *gin.Context) {
 			uptime = float64(summary.SuccessfulScans) / float64(summary.TotalScans) * 100
 		}
 		scanInfo = gin.H{
-			"overall_health":      summary.OverallHealth,
-			"http_status":         summary.HTTPStatus,
-			"dns_status":          summary.DNSStatus,
-			"ssl_status":          summary.SSLStatus,
+			"overall_health":       summary.OverallHealth,
+			"http_status":          summary.HTTPStatus,
+			"dns_status":           summary.DNSStatus,
+			"ssl_status":           summary.SSLStatus,
 			"safe_browsing_status": summary.SafeBrowsingStatus,
-			"virustotal_status":   summary.VirusTotalStatus,
-			"uptime_percentage":   uptime,
-			"total_scans":         summary.TotalScans,
-			"successful_scans":    summary.SuccessfulScans,
-			"last_scanned_at":     summary.LastScannedAt,
+			"virustotal_status":    summary.VirusTotalStatus,
+			"uptime_percentage":    uptime,
+			"total_scans":          summary.TotalScans,
+			"successful_scans":     summary.SuccessfulScans,
+			"last_scanned_at":      summary.LastScannedAt,
 		}
 	}
 
@@ -1721,6 +1727,17 @@ func (h *DomainHandler) AdminUpdateDomainStatus(c *gin.Context) {
 			if err := h.pdns.SetSubdomainDisabled(domain.RootDomain.Domain, domain.FullDomain, disabled); err != nil {
 				fmt.Printf("Warning: Failed to %s DNS records in PowerDNS for %s: %v\n",
 					map[bool]string{true: "disable", false: "enable"}[disabled], domain.FullDomain, err)
+			}
+		}()
+	}
+
+	// 联动 CyberPanel：同步主机账号状态
+	if h.cpHandler != nil {
+		go func() {
+			if req.Status == "suspended" {
+				h.cpHandler.SuspendAccountByDomain(domain.ID)
+			} else if req.Status == "active" && oldStatus == "suspended" {
+				h.cpHandler.UnsuspendAccountByDomain(domain.ID)
 			}
 		}()
 	}
