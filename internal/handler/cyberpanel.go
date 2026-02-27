@@ -306,6 +306,7 @@ func (h *CyberPanelHandler) AdminUpdateServer(c *gin.Context) {
 }
 
 // AdminDeleteServer DELETE /api/admin/cyberpanel/servers/:id
+// 删除服务器前先终止所有关联账号（调用 CyberPanel deleteWebsite），再删除账号记录和服务器记录
 func (h *CyberPanelHandler) AdminDeleteServer(c *gin.Context) {
 	serverID := c.Param("id")
 	var server models.CyberPanelServer
@@ -314,19 +315,23 @@ func (h *CyberPanelHandler) AdminDeleteServer(c *gin.Context) {
 		return
 	}
 
-	// 检查是否还有关联账号
-	var count int64
-	h.db.Model(&models.CyberPanelAccount{}).Where("server_id = ? AND status != ?", server.ID, "terminated").Count(&count)
-	if count > 0 {
-		c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("Server still has %d active accounts, cannot delete", count)})
-		return
+	// 加载该服务器所有未终止的账号，逐一调用 CyberPanel 删除 website
+	var accounts []models.CyberPanelAccount
+	h.db.Preload("Server").Preload("Domain").
+		Where("server_id = ? AND status != ?", server.ID, "terminated").
+		Find(&accounts)
+	for i := range accounts {
+		h.terminateAccount(&accounts[i])
 	}
+
+	// 删除该服务器所有账号记录（含已终止的历史记录）
+	h.db.Unscoped().Where("server_id = ?", server.ID).Delete(&models.CyberPanelAccount{})
 
 	if err := h.db.Delete(&server).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete server"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "Server deleted"})
+	c.JSON(http.StatusOK, gin.H{"message": "Server and all associated accounts deleted"})
 }
 
 // AdminTestServer POST /api/admin/cyberpanel/servers/:id/test
@@ -727,6 +732,73 @@ func (h *CyberPanelHandler) GetAccountCredentials(c *gin.Context) {
 		"cp_password": cpPassword,
 		"login_url":   loginURL,
 	})
+}
+
+// AutoLogin GET /api/cyberpanel/accounts/:id/autologin
+// 调用 CyberPanel /api/loginAPI，返回含 session 的跳转 URL，密码不下发前端
+func (h *CyberPanelHandler) AutoLogin(c *gin.Context) {
+	userID, exists := middleware.GetUserID(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	accountID := c.Param("id")
+	var account models.CyberPanelAccount
+	if err := h.db.Preload("Server").Where("id = ? AND user_id = ?", accountID, userID).First(&account).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Account not found"})
+		return
+	}
+	if account.Server == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Server not found"})
+		return
+	}
+
+	cpPassword, err := h.decryptPass(account.CpPassword)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decrypt credentials"})
+		return
+	}
+
+	payload, _ := json.Marshal(map[string]string{
+		"username": account.CpUsername,
+		"password": cpPassword,
+	})
+	req, err := http.NewRequest(http.MethodPost, account.Server.URL+"/api/loginAPI", bytes.NewReader(payload))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to build login request"})
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := cpHTTPClient(15 * time.Second).Do(req)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "CyberPanel login request failed: " + err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&result); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "Failed to parse CyberPanel response"})
+		return
+	}
+
+	if errMsg, ok := result["error_message"].(string); ok && errMsg != "" && errMsg != "None" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": errMsg})
+		return
+	}
+
+	// CyberPanel 返回相对路径，拼接服务器地址
+	redirectPath, _ := result["redirect"].(string)
+	if redirectPath == "" {
+		redirectPath = "/dashboard/"
+	}
+	baseURL := strings.TrimRight(account.Server.URL, "/")
+	if strings.HasPrefix(redirectPath, "http") {
+		c.JSON(http.StatusOK, gin.H{"redirect_url": redirectPath})
+	} else {
+		c.JSON(http.StatusOK, gin.H{"redirect_url": baseURL + "/" + strings.TrimLeft(redirectPath, "/")})
+	}
 }
 
 // DeleteMyAccount DELETE /api/cyberpanel/accounts/:id

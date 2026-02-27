@@ -188,6 +188,7 @@ func Setup(db *gorm.DB, rdb *redis.Client, cfg *config.Config) *gin.Engine {
 				cp.GET("/accounts", cyberPanelHandler.ListMyAccounts)
 				cp.POST("/accounts", cyberPanelHandler.CreateAccount)
 				cp.GET("/accounts/:id/credentials", cyberPanelHandler.GetAccountCredentials)
+				cp.GET("/accounts/:id/autologin", cyberPanelHandler.AutoLogin)
 				cp.DELETE("/accounts/:id", cyberPanelHandler.DeleteMyAccount)
 			}
 		}

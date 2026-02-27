@@ -1132,14 +1132,12 @@ const createCpAccount = async () => {
 const openCpPanel = async (acc) => {
   cpCredentialsLoading.value = true
   try {
-    const res = await axios.get(`/api/cyberpanel/accounts/${acc.id}/credentials`)
-    cpCredentials.value = res.data
-    // 在新标签页打开 CyberPanel
-    if (res.data.login_url) {
-      window.open(res.data.login_url, '_blank', 'noopener')
+    const res = await axios.get(`/api/cyberpanel/accounts/${acc.id}/autologin`)
+    if (res.data.redirect_url) {
+      window.open(res.data.redirect_url, '_blank', 'noopener')
     }
   } catch (e) {
-    toast.error(e.response?.data?.error || 'Failed to get credentials')
+    toast.error(e.response?.data?.error || 'Failed to auto-login')
   } finally {
     cpCredentialsLoading.value = false
   }
