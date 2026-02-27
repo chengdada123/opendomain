@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -40,12 +41,23 @@ type cpRequest struct {
 	State         string `json:"state,omitempty"`
 }
 
+// cpHTTPClient returns an HTTP client that skips TLS certificate verification.
+// CyberPanel instances commonly use self-signed certificates with no IP SANs.
+func cpHTTPClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
+		},
+	}
+}
+
 func (h *CyberPanelHandler) callCyberPanel(serverURL, endpoint string, payload cpRequest) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-	resp, err := (&http.Client{Timeout: 30 * time.Second}).Post(
+	resp, err := cpHTTPClient(30 * time.Second).Post(
 		serverURL+endpoint,
 		"application/json",
 		bytes.NewReader(body),
@@ -260,7 +272,7 @@ func (h *CyberPanelHandler) AdminTestServer(c *gin.Context) {
 		"adminPass": adminPass,
 	}
 	body, _ := json.Marshal(payload)
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := cpHTTPClient(10 * time.Second)
 	resp, err := client.Post(server.URL+"/api/listWebsites", "application/json", bytes.NewReader(body))
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"success": false, "error": err.Error()})
