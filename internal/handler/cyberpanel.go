@@ -42,13 +42,34 @@ type cpRequest struct {
 	State         string `json:"state,omitempty"`
 }
 
-// cpHTTPClient returns an HTTP client that skips TLS certificate verification.
-// CyberPanel instances commonly use self-signed certificates with no IP SANs.
+// cpHTTPClient returns an HTTP client that skips TLS certificate verification
+// and preserves the POST method when following redirects.
+// CyberPanel instances commonly use self-signed certificates with no IP SANs,
+// and some deployments redirect HTTP→HTTPS which would downgrade POST→GET.
 func cpHTTPClient(timeout time.Duration) *http.Client {
 	return &http.Client{
 		Timeout: timeout,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
+		},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("too many redirects")
+			}
+			// Preserve POST method and body on redirect.
+			// Go default downgrades POST→GET on 301/302, which causes CyberPanel
+			// to reject with "Only POST method allowed."
+			if len(via) > 0 && via[0].Method == http.MethodPost {
+				req.Method = http.MethodPost
+				if via[0].GetBody != nil {
+					if b, err := via[0].GetBody(); err == nil {
+						req.Body = b
+					}
+				}
+				req.ContentLength = via[0].ContentLength
+				req.Header.Set("Content-Type", via[0].Header.Get("Content-Type"))
+			}
+			return nil
 		},
 	}
 }
@@ -58,11 +79,14 @@ func (h *CyberPanelHandler) callCyberPanel(serverURL, endpoint string, payload c
 	if err != nil {
 		return err
 	}
-	resp, err := cpHTTPClient(30*time.Second).Post(
-		serverURL+endpoint,
-		"application/json",
-		bytes.NewReader(body),
-	)
+	// Use http.NewRequest so that GetBody is auto-set on bytes.NewReader,
+	// allowing the redirect handler to re-send the body on HTTP→HTTPS redirects.
+	req, err := http.NewRequest(http.MethodPost, serverURL+endpoint, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := cpHTTPClient(30*time.Second).Do(req)
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}
@@ -293,8 +317,13 @@ func (h *CyberPanelHandler) AdminTestServer(c *gin.Context) {
 		"adminPass": adminPass,
 	}
 	body, _ := json.Marshal(payload)
-	client := cpHTTPClient(10 * time.Second)
-	resp, err := client.Post(server.URL+"/api/verifyConn", "application/json", bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/api/verifyConn", bytes.NewReader(body))
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := cpHTTPClient(10 * time.Second).Do(req)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"success": false, "error": err.Error()})
 		return
