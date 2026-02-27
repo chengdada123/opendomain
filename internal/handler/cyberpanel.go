@@ -610,19 +610,37 @@ func (h *CyberPanelHandler) CreateAccount(c *gin.Context) {
 		return
 	}
 
-	// 自动生成凭据
-	cpUsername := generateCpUsername(user.Username, userID)
-	cpPassword, err := generateCpPassword()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate credentials"})
-		return
-	}
+	// 同一用户在同一服务器复用凭据（1 CP用户 per 用户×服务器）
+	var cpUsername string
+	var cpPassword string
+	var encPass string
 
-	// 加密密码存储
-	encPass, err := h.encryptPass(cpPassword)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to encrypt password"})
-		return
+	var sibling models.CyberPanelAccount
+	if err := h.db.Where("user_id = ? AND server_id = ? AND status != ?", userID, server.ID, "terminated").
+		First(&sibling).Error; err == nil {
+		// 复用已有凭据
+		cpUsername = sibling.CpUsername
+		encPass = sibling.CpPassword
+		decrypted, dErr := h.decryptPass(sibling.CpPassword)
+		if dErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decrypt existing credentials"})
+			return
+		}
+		cpPassword = decrypted
+	} else {
+		// 首次在该服务器创建，生成新凭据
+		cpUsername = generateCpUsername(user.Username, userID)
+		var genErr error
+		cpPassword, genErr = generateCpPassword()
+		if genErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate credentials"})
+			return
+		}
+		encPass, err = h.encryptPass(cpPassword)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to encrypt password"})
+			return
+		}
 	}
 
 	account := models.CyberPanelAccount{
