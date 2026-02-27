@@ -206,7 +206,7 @@
         <h3 class="font-bold text-2xl mb-1">{{ $t('domains.cpHostingTitle') }}</h3>
         <p class="text-sm opacity-60 mb-4 font-mono">{{ cpModalDomain.full_domain }}</p>
 
-        <!-- Existing account view -->
+        <!-- 已有账号：管理视图 -->
         <div v-if="cpAccountByDomain[cpModalDomain.id]" class="space-y-4">
           <div class="grid grid-cols-2 gap-3 text-sm">
             <div class="bg-base-200 rounded-lg p-3">
@@ -222,21 +222,21 @@
               <p class="opacity-60 text-xs mb-1">{{ $t('domains.cpHostingServer') }}</p>
               <p class="font-medium">{{ cpAccountByDomain[cpModalDomain.id].server?.name || '-' }}</p>
             </div>
-            <div class="bg-base-200 rounded-lg p-3">
+            <div class="bg-base-200 rounded-lg p-3 col-span-2">
               <p class="opacity-60 text-xs mb-1">{{ $t('domains.cpHostingUsername') }}</p>
-              <p class="font-mono font-bold">{{ cpAccountByDomain[cpModalDomain.id].cp_username }}</p>
-            </div>
-            <div class="bg-base-200 rounded-lg p-3">
-              <p class="opacity-60 text-xs mb-1">{{ $t('domains.cpHostingPassword') }}</p>
-              <div class="flex items-center gap-2">
-                <p class="font-mono font-bold">{{ showCpPassword ? cpAccountByDomain[cpModalDomain.id].cp_password : '••••••••' }}</p>
-                <button class="btn btn-xs btn-ghost" @click="showCpPassword = !showCpPassword">
-                  <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path v-if="showCpPassword" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
-                    <path v-else stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
-                </button>
+              <div class="flex items-center justify-between">
+                <p class="font-mono font-bold">{{ cpAccountByDomain[cpModalDomain.id].cp_username }}</p>
+                <button @click="copyText(cpAccountByDomain[cpModalDomain.id].cp_username)" class="btn btn-xs btn-ghost">Copy</button>
               </div>
+            </div>
+          </div>
+
+          <!-- 按需加载的密码 -->
+          <div v-if="cpCredentials" class="bg-base-200 rounded-lg p-3 text-sm">
+            <p class="opacity-60 text-xs mb-1">{{ $t('domains.cpHostingPassword') }}</p>
+            <div class="flex items-center justify-between">
+              <p class="font-mono font-bold tracking-wider">{{ cpCredentials.cp_password }}</p>
+              <button @click="copyText(cpCredentials.cp_password)" class="btn btn-xs btn-ghost">Copy</button>
             </div>
           </div>
 
@@ -247,42 +247,66 @@
             {{ cpAccountByDomain[cpModalDomain.id].error_msg }}
           </div>
 
-          <div class="modal-action">
-            <button @click="showCpModal = false; showCpPassword = false" class="btn btn-ghost">{{ $t('common.close') }}</button>
+          <div class="modal-action flex-wrap gap-2">
+            <button @click="closeCpModal" class="btn btn-ghost">{{ $t('common.close') }}</button>
             <button @click="confirmDeleteCpAccount" class="btn btn-error" :disabled="cpSubmitting">
               <span v-if="cpSubmitting" class="loading loading-spinner loading-sm"></span>
               {{ $t('domains.cpHostingDelete') }}
             </button>
+            <button @click="openCpPanel(cpAccountByDomain[cpModalDomain.id])" class="btn btn-primary" :disabled="cpCredentialsLoading">
+              <span v-if="cpCredentialsLoading" class="loading loading-spinner loading-sm"></span>
+              <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+              {{ $t('domains.cpHostingOpenPanel') }}
+            </button>
           </div>
         </div>
 
-        <!-- Apply form -->
+        <!-- 申请表单：选择服务器 -->
         <div v-else class="space-y-4">
           <p class="text-sm opacity-70">{{ $t('domains.cpHostingApply') }}</p>
-          <div class="form-control">
-            <label class="label"><span class="label-text">{{ $t('domains.cpHostingUsername') }} *</span></label>
-            <input v-model="cpForm.cp_username" type="text" class="input input-bordered" placeholder="e.g. john" />
+
+          <div v-if="cpServersLoading" class="flex justify-center py-6">
+            <span class="loading loading-spinner loading-md"></span>
           </div>
-          <div class="form-control">
-            <label class="label">
-              <span class="label-text">{{ $t('domains.cpHostingPassword') }} *</span>
-              <span class="label-text-alt opacity-60">{{ $t('domains.cpHostingPasswordHint') }}</span>
-            </label>
-            <input v-model="cpForm.cp_password" type="password" class="input input-bordered" />
+          <div v-else-if="cpServers.length === 0" class="text-center py-4 text-sm opacity-60">
+            {{ $t('domains.cpNoServersAvailable') }}
+          </div>
+          <div v-else class="space-y-2">
+            <p class="text-sm font-medium">{{ $t('domains.cpHostingChooseServer') }}</p>
+            <div
+              v-for="srv in cpServers" :key="srv.id"
+              class="flex items-center gap-3 p-3 rounded-lg border-2 cursor-pointer transition-colors"
+              :class="[
+                !srv.available ? 'opacity-50 cursor-not-allowed border-base-300' :
+                cpSelectedServer === srv.id ? 'border-primary bg-primary/5' : 'border-base-300 hover:border-primary/40'
+              ]"
+              @click="srv.available && (cpSelectedServer = srv.id)"
+            >
+              <input type="radio" :value="srv.id" v-model="cpSelectedServer" :disabled="!srv.available" class="radio radio-primary radio-sm" />
+              <div class="flex-1 min-w-0">
+                <p class="font-semibold text-sm">{{ srv.name }}</p>
+                <p class="text-xs opacity-60">
+                  {{ srv.current_accounts }} / {{ srv.max_accounts === 0 ? '∞' : srv.max_accounts }} {{ $t('domains.cpAccountsUsed') }}
+                </p>
+              </div>
+              <span v-if="!srv.available" class="text-xs text-red-500 font-medium">{{ $t('domains.cpServerFull') }}</span>
+            </div>
           </div>
 
           <div v-if="cpFormError" class="alert alert-error text-sm">{{ cpFormError }}</div>
 
           <div class="modal-action">
-            <button @click="showCpModal = false" class="btn btn-ghost">{{ $t('common.cancel') }}</button>
-            <button @click="createCpAccount" class="btn btn-primary" :disabled="cpSubmitting">
+            <button @click="closeCpModal" class="btn btn-ghost">{{ $t('common.cancel') }}</button>
+            <button @click="createCpAccount" class="btn btn-primary" :disabled="cpSubmitting || !cpSelectedServer || cpServers.length === 0">
               <span v-if="cpSubmitting" class="loading loading-spinner loading-sm"></span>
-              {{ $t('common.submit') }}
+              {{ $t('domains.cpApplyHosting') }}
             </button>
           </div>
         </div>
       </div>
-      <form method="dialog" class="modal-backdrop" @click="showCpModal = false; showCpPassword = false"></form>
+      <form method="dialog" class="modal-backdrop" @click="closeCpModal"></form>
     </dialog>
 
     <!-- CyberPanel Delete Confirm Modal -->
@@ -1026,13 +1050,16 @@ const scanTotalPages = ref(1)
 
 // CyberPanel Hosting
 const cpAccounts = ref([])
+const cpServers = ref([])
+const cpServersLoading = ref(false)
+const cpSelectedServer = ref(null)
 const showCpModal = ref(false)
 const showCpDeleteConfirm = ref(false)
-const showCpPassword = ref(false)
 const cpModalDomain = ref(null)
 const cpSubmitting = ref(false)
 const cpFormError = ref('')
-const cpForm = ref({ cp_username: '', cp_password: '' })
+const cpCredentials = ref(null)       // { cp_username, cp_password, login_url }
+const cpCredentialsLoading = ref(false)
 
 const cpAccountByDomain = computed(() => {
   const map = {}
@@ -1044,6 +1071,11 @@ const cpAccountByDomain = computed(() => {
   return map
 })
 
+const closeCpModal = () => {
+  showCpModal.value = false
+  cpCredentials.value = null
+}
+
 const fetchCpAccounts = async () => {
   try {
     const res = await axios.get('/api/cyberpanel/accounts')
@@ -1053,35 +1085,70 @@ const fetchCpAccounts = async () => {
   }
 }
 
+const fetchCpServers = async () => {
+  cpServersLoading.value = true
+  try {
+    const res = await axios.get('/api/cyberpanel/servers')
+    cpServers.value = res.data.servers || []
+    // 预选默认可用的第一个服务器
+    const first = cpServers.value.find(s => s.available)
+    cpSelectedServer.value = first ? first.id : null
+  } catch (e) {
+    cpServers.value = []
+  } finally {
+    cpServersLoading.value = false
+  }
+}
+
 const openCpHosting = (domain) => {
   cpModalDomain.value = domain
-  cpForm.value = { cp_username: '', cp_password: '' }
   cpFormError.value = ''
-  showCpPassword.value = false
+  cpCredentials.value = null
   showCpModal.value = true
+  // 如果还没有账号，加载服务器列表
+  if (!cpAccountByDomain.value[domain.id]) {
+    fetchCpServers()
+  }
 }
 
 const createCpAccount = async () => {
-  if (!cpForm.value.cp_username || !cpForm.value.cp_password) {
-    cpFormError.value = t('domains.cpHostingPasswordHint')
-    return
-  }
   cpSubmitting.value = true
   cpFormError.value = ''
   try {
     await axios.post('/api/cyberpanel/accounts', {
       domain_id: cpModalDomain.value.id,
-      cp_username: cpForm.value.cp_username,
-      cp_password: cpForm.value.cp_password,
+      server_id: cpSelectedServer.value || undefined,
     })
     toast.success(t('domains.cpHostingCreated'))
-    showCpModal.value = false
+    closeCpModal()
     await fetchCpAccounts()
   } catch (e) {
     cpFormError.value = e.response?.data?.error || 'Failed'
   } finally {
     cpSubmitting.value = false
   }
+}
+
+const openCpPanel = async (acc) => {
+  cpCredentialsLoading.value = true
+  try {
+    const res = await axios.get(`/api/cyberpanel/accounts/${acc.id}/credentials`)
+    cpCredentials.value = res.data
+    // 在新标签页打开 CyberPanel
+    if (res.data.login_url) {
+      window.open(res.data.login_url, '_blank', 'noopener')
+    }
+  } catch (e) {
+    toast.error(e.response?.data?.error || 'Failed to get credentials')
+  } finally {
+    cpCredentialsLoading.value = false
+  }
+}
+
+const copyText = (text) => {
+  navigator.clipboard.writeText(text).then(() => {
+    toast.success(t('common.copied') || 'Copied!')
+  })
 }
 
 const confirmDeleteCpAccount = () => {
@@ -1096,7 +1163,7 @@ const deleteCpAccount = async () => {
     await axios.delete(`/api/cyberpanel/accounts/${acc.id}`)
     toast.success(t('domains.cpHostingDeleted'))
     showCpDeleteConfirm.value = false
-    showCpModal.value = false
+    closeCpModal()
     await fetchCpAccounts()
   } catch (e) {
     toast.error(e.response?.data?.error || 'Failed')

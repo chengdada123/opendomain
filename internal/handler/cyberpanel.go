@@ -2,12 +2,16 @@ package handler
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -40,6 +44,35 @@ type cpRequest struct {
 	WebsiteOwner  string `json:"websiteOwner,omitempty"`
 	OwnerPassword string `json:"ownerPassword,omitempty"`
 	State         string `json:"state,omitempty"`
+}
+
+// generateCpUsername 根据用户名和 ID 自动生成 CyberPanel 登录名
+// 格式：{小写字母数字前缀}{userID}，总长不超过 20 字符
+func generateCpUsername(username string, userID uint) string {
+	reg := regexp.MustCompile(`[^a-z0-9]`)
+	sanitized := reg.ReplaceAllString(strings.ToLower(username), "")
+	suffix := strconv.Itoa(int(userID))
+	maxPrefix := 16 - len(suffix)
+	if maxPrefix < 1 {
+		maxPrefix = 1
+	}
+	if len(sanitized) > maxPrefix {
+		sanitized = sanitized[:maxPrefix]
+	}
+	if sanitized == "" {
+		sanitized = "user"
+	}
+	return sanitized + suffix
+}
+
+// generateCpPassword 生成 20 位高强度随机密码
+func generateCpPassword() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	// base64url 去掉填充，取前 20 位，保证只含 URL 安全字符
+	return base64.URLEncoding.EncodeToString(b)[:20], nil
 }
 
 // cpHTTPClient returns an HTTP client that skips TLS certificate verification
@@ -86,7 +119,7 @@ func (h *CyberPanelHandler) callCyberPanel(serverURL, endpoint string, payload c
 		return fmt.Errorf("failed to build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := cpHTTPClient(30*time.Second).Do(req)
+	resp, err := cpHTTPClient(30 * time.Second).Do(req)
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}
@@ -469,6 +502,31 @@ func (h *CyberPanelHandler) AdminTerminateAccount(c *gin.Context) {
 // 用户接口
 // ════════════════════════════════════════════════════════════════════════════
 
+// ListPublicServers GET /api/cyberpanel/servers — 列出对用户可见的活跃服务器（无敏感信息）
+func (h *CyberPanelHandler) ListPublicServers(c *gin.Context) {
+	var servers []models.CyberPanelServer
+	h.db.Where("is_active = ?", true).Order("is_default DESC, id ASC").Find(&servers)
+
+	type serverInfo struct {
+		ID              uint   `json:"id"`
+		Name            string `json:"name"`
+		MaxAccounts     int    `json:"max_accounts"`
+		CurrentAccounts int    `json:"current_accounts"`
+		Available       bool   `json:"available"`
+	}
+	result := make([]serverInfo, 0, len(servers))
+	for _, s := range servers {
+		result = append(result, serverInfo{
+			ID:              s.ID,
+			Name:            s.Name,
+			MaxAccounts:     s.MaxAccounts,
+			CurrentAccounts: s.CurrentAccounts,
+			Available:       s.MaxAccounts == 0 || s.CurrentAccounts < s.MaxAccounts,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"servers": result})
+}
+
 // ListMyAccounts GET /api/cyberpanel/accounts
 func (h *CyberPanelHandler) ListMyAccounts(c *gin.Context) {
 	userID, exists := middleware.GetUserID(c)
@@ -493,6 +551,7 @@ func (h *CyberPanelHandler) ListMyAccounts(c *gin.Context) {
 }
 
 // CreateAccount POST /api/cyberpanel/accounts
+// 凭据自动生成，用户仅需选择域名和服务器
 func (h *CyberPanelHandler) CreateAccount(c *gin.Context) {
 	userID, exists := middleware.GetUserID(c)
 	if !exists {
@@ -551,19 +610,26 @@ func (h *CyberPanelHandler) CreateAccount(c *gin.Context) {
 		return
 	}
 
-	// 加密密码
-	encPass, err := h.encryptPass(req.CpPassword)
+	// 自动生成凭据
+	cpUsername := generateCpUsername(user.Username, userID)
+	cpPassword, err := generateCpPassword()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate credentials"})
+		return
+	}
+
+	// 加密密码存储
+	encPass, err := h.encryptPass(cpPassword)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to encrypt password"})
 		return
 	}
 
-	now := time.Now()
 	account := models.CyberPanelAccount{
 		UserID:     userID,
 		DomainID:   domain.ID,
 		ServerID:   server.ID,
-		CpUsername: req.CpUsername,
+		CpUsername: cpUsername,
 		CpPassword: encPass,
 		Status:     "pending",
 	}
@@ -572,13 +638,11 @@ func (h *CyberPanelHandler) CreateAccount(c *gin.Context) {
 		return
 	}
 
-	_ = now
-
-	// 解密管理员密码，调用 CyberPanel 创建主机
+	// 调用 CyberPanel 创建主机
 	adminPass, err := h.decryptPass(server.AdminPass)
 	if err != nil {
 		errMsg := "Failed to decrypt server password"
-		h.db.Model(&account).Updates(map[string]interface{}{"status": "pending", "error_msg": errMsg})
+		h.db.Model(&account).Update("error_msg", errMsg)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": errMsg})
 		return
 	}
@@ -589,14 +653,13 @@ func (h *CyberPanelHandler) CreateAccount(c *gin.Context) {
 		DomainName:    domain.FullDomain,
 		PackageName:   server.PackageName,
 		OwnerEmail:    user.Email,
-		WebsiteOwner:  req.CpUsername,
-		OwnerPassword: req.CpPassword,
+		WebsiteOwner:  cpUsername,
+		OwnerPassword: cpPassword,
 	})
 
 	if cpErr != nil {
 		errMsg := cpErr.Error()
 		h.db.Model(&account).Updates(map[string]interface{}{"status": "pending", "error_msg": errMsg})
-		// 仍然返回 201，让用户知道账号已创建，但有错误
 		acc := h.loadAccount(account.ID)
 		resp := h.toAccountResponse(*acc)
 		c.JSON(http.StatusCreated, gin.H{
@@ -606,13 +669,46 @@ func (h *CyberPanelHandler) CreateAccount(c *gin.Context) {
 		return
 	}
 
-	// 成功：更新状态和服务器账号计数
 	h.db.Model(&account).Updates(map[string]interface{}{"status": "active", "error_msg": nil})
 	h.db.Model(server).UpdateColumn("current_accounts", gorm.Expr("current_accounts + 1"))
 
 	acc := h.loadAccount(account.ID)
 	resp := h.toAccountResponse(*acc)
 	c.JSON(http.StatusCreated, gin.H{"account": resp})
+}
+
+// GetAccountCredentials GET /api/cyberpanel/accounts/:id/credentials
+// 返回账号本人的面板登录凭据（独立接口，按需获取）
+func (h *CyberPanelHandler) GetAccountCredentials(c *gin.Context) {
+	userID, exists := middleware.GetUserID(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	accountID := c.Param("id")
+	var account models.CyberPanelAccount
+	if err := h.db.Preload("Server").Where("id = ? AND user_id = ?", accountID, userID).First(&account).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Account not found"})
+		return
+	}
+
+	cpPassword, err := h.decryptPass(account.CpPassword)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decrypt credentials"})
+		return
+	}
+
+	loginURL := ""
+	if account.Server != nil {
+		loginURL = account.Server.URL
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"cp_username": account.CpUsername,
+		"cp_password": cpPassword,
+		"login_url":   loginURL,
+	})
 }
 
 // DeleteMyAccount DELETE /api/cyberpanel/accounts/:id
@@ -720,20 +816,18 @@ func (h *CyberPanelHandler) loadAccount(id uint) *models.CyberPanelAccount {
 }
 
 func (h *CyberPanelHandler) toAccountResponse(acc models.CyberPanelAccount) models.CyberPanelAccountResponse {
-	plainPass, _ := h.decryptPass(acc.CpPassword)
-
 	resp := models.CyberPanelAccountResponse{
 		ID:         acc.ID,
 		UserID:     acc.UserID,
 		DomainID:   acc.DomainID,
 		ServerID:   acc.ServerID,
 		CpUsername: acc.CpUsername,
-		CpPassword: plainPass,
-		Status:     acc.Status,
-		ErrorMsg:   acc.ErrorMsg,
-		CreatedAt:  acc.CreatedAt,
-		UpdatedAt:  acc.UpdatedAt,
-		Domain:     acc.Domain,
+		// CpPassword 不包含在列表响应中，通过 /credentials 接口单独获取
+		Status:    acc.Status,
+		ErrorMsg:  acc.ErrorMsg,
+		CreatedAt: acc.CreatedAt,
+		UpdatedAt: acc.UpdatedAt,
+		Domain:    acc.Domain,
 	}
 	if acc.Server != nil {
 		resp.Server = acc.Server.ToResponse()

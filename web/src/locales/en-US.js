@@ -20,7 +20,8 @@ export default {
     warning: 'Warning',
     info: 'Info',
     or: 'OR',
-    clear: 'Clear'
+    clear: 'Clear',
+    copied: 'Copied!'
   },
   nav: {
     home: 'Home',
@@ -293,7 +294,12 @@ export default {
     cpHostingDeleteConfirm: 'Delete this hosting account? This will also remove the website from CyberPanel and cannot be undone.',
     cpHostingDeleted: 'Hosting account deleted',
     cpHostingCreated: 'Hosting applied successfully',
-    cpHostingAlreadyExists: 'This domain already has a hosting account'
+    cpHostingAlreadyExists: 'This domain already has a hosting account',
+    cpHostingOpenPanel: 'Open Control Panel',
+    cpHostingChooseServer: 'Choose Server',
+    cpNoServersAvailable: 'No hosting servers available, please contact admin',
+    cpAccountsUsed: 'accounts',
+    cpServerFull: 'Full'
   },
   dns: {
     title: 'DNS Record Management',

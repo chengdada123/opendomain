@@ -184,8 +184,10 @@ func Setup(db *gorm.DB, rdb *redis.Client, cfg *config.Config) *gin.Engine {
 			// CyberPanel 主机账号（用户）
 			cp := protected.Group("/cyberpanel")
 			{
+				cp.GET("/servers", cyberPanelHandler.ListPublicServers)
 				cp.GET("/accounts", cyberPanelHandler.ListMyAccounts)
 				cp.POST("/accounts", cyberPanelHandler.CreateAccount)
+				cp.GET("/accounts/:id/credentials", cyberPanelHandler.GetAccountCredentials)
 				cp.DELETE("/accounts/:id", cyberPanelHandler.DeleteMyAccount)
 			}
 		}

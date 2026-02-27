@@ -93,26 +93,30 @@ func (s *CyberPanelServer) ToResponse() *CyberPanelServerResponse {
 	}
 }
 
-// CyberPanelCreateAccountRequest 用户申请主机账号请求
+// CyberPanelCreateAccountRequest 用户申请主机账号请求（无需手动输入用户名密码）
 type CyberPanelCreateAccountRequest struct {
-	DomainID   uint   `json:"domain_id" binding:"required"`
-	CpUsername string `json:"cp_username" binding:"required,min=3,max=32"`
-	CpPassword string `json:"cp_password" binding:"required,min=6"`
-	ServerID   *uint  `json:"server_id"` // 可选，指定服务器
+	DomainID uint  `json:"domain_id" binding:"required"`
+	ServerID *uint `json:"server_id"` // 可选，不填则自动轮询选择
 }
 
-// CyberPanelAccountResponse 账号响应（对用户可见，包含明文密码）
+// CyberPanelAccountResponse 账号响应（不含密码，密码通过独立接口获取）
 type CyberPanelAccountResponse struct {
 	ID         uint                      `json:"id"`
 	UserID     uint                      `json:"user_id"`
 	DomainID   uint                      `json:"domain_id"`
 	ServerID   uint                      `json:"server_id"`
 	CpUsername string                    `json:"cp_username"`
-	CpPassword string                    `json:"cp_password"` // 解密后的明文
 	Status     string                    `json:"status"`
 	ErrorMsg   *string                   `json:"error_msg,omitempty"`
 	CreatedAt  time.Time                 `json:"created_at"`
 	UpdatedAt  time.Time                 `json:"updated_at"`
 	Domain     *Domain                   `json:"domain,omitempty"`
 	Server     *CyberPanelServerResponse `json:"server,omitempty"`
+}
+
+// CyberPanelCredentials 面板登录凭据（仅账号本人通过专用接口获取）
+type CyberPanelCredentials struct {
+	CpUsername string `json:"cp_username"`
+	CpPassword string `json:"cp_password"`
+	LoginURL   string `json:"login_url"` // CyberPanel 面板地址
 }

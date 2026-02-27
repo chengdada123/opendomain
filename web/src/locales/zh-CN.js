@@ -20,7 +20,8 @@ export default {
     warning: '警告',
     info: '信息',
     or: '或',
-    clear: '清除'
+    clear: '清除',
+    copied: '已复制！'
   },
   nav: {
     home: '首页',
@@ -293,7 +294,12 @@ export default {
     cpHostingDeleteConfirm: '确认删除此主机账号？此操作将同步删除 CyberPanel 上的网站，不可恢复。',
     cpHostingDeleted: '主机账号已删除',
     cpHostingCreated: '主机申请成功',
-    cpHostingAlreadyExists: '此域名已有主机账号'
+    cpHostingAlreadyExists: '此域名已有主机账号',
+    cpHostingOpenPanel: '打开控制面板',
+    cpHostingChooseServer: '选择服务器',
+    cpNoServersAvailable: '暂无可用服务器，请联系管理员',
+    cpAccountsUsed: '个账号',
+    cpServerFull: '已满'
   },
   dns: {
     title: 'DNS 记录管理',
