@@ -33,7 +33,8 @@ func NewCyberPanelHandler(db *gorm.DB, cfg *config.Config) *CyberPanelHandler {
 type cpRequest struct {
 	AdminUser     string `json:"adminUser"`
 	AdminPass     string `json:"adminPass"`
-	DomainName    string `json:"domainName"`
+	DomainName    string `json:"domainName,omitempty"`
+	WebsiteName   string `json:"websiteName,omitempty"`
 	PackageName   string `json:"packageName,omitempty"`
 	OwnerEmail    string `json:"ownerEmail,omitempty"`
 	WebsiteOwner  string `json:"websiteOwner,omitempty"`
@@ -57,7 +58,7 @@ func (h *CyberPanelHandler) callCyberPanel(serverURL, endpoint string, payload c
 	if err != nil {
 		return err
 	}
-	resp, err := cpHTTPClient(30 * time.Second).Post(
+	resp, err := cpHTTPClient(30*time.Second).Post(
 		serverURL+endpoint,
 		"application/json",
 		bytes.NewReader(body),
@@ -67,9 +68,29 @@ func (h *CyberPanelHandler) callCyberPanel(serverURL, endpoint string, payload c
 	}
 	defer resp.Body.Close()
 
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("CyberPanel returned %d: %s", resp.StatusCode, string(raw))
+		return fmt.Errorf("CyberPanel returned HTTP %d: %s", resp.StatusCode, string(raw))
+	}
+
+	// CyberPanel always returns HTTP 200; check application-level error in body.
+	// All endpoints return {"error_message": "None"} on success,
+	// or {"error_message": "<reason>"} on failure.
+	var result map[string]interface{}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		// Non-JSON response (e.g. HTML error page) — treat as failure
+		limit := 256
+		if len(raw) < limit {
+			limit = len(raw)
+		}
+		return fmt.Errorf("unexpected response: %s", string(raw[:limit]))
+	}
+	if errMsg, ok := result["error_message"]; ok {
+		s := fmt.Sprintf("%v", errMsg)
+		if s != "" && s != "None" && s != "none" {
+			return fmt.Errorf("%s", s)
+		}
 	}
 	return nil
 }
@@ -266,23 +287,38 @@ func (h *CyberPanelHandler) AdminTestServer(c *gin.Context) {
 		return
 	}
 
-	// 用 listWebsites 接口验证连通性
+	// 使用官方 verifyConn 接口验证连通性
 	payload := map[string]string{
 		"adminUser": server.AdminUser,
 		"adminPass": adminPass,
 	}
 	body, _ := json.Marshal(payload)
 	client := cpHTTPClient(10 * time.Second)
-	resp, err := client.Post(server.URL+"/api/listWebsites", "application/json", bytes.NewReader(body))
+	resp, err := client.Post(server.URL+"/api/verifyConn", "application/json", bytes.NewReader(body))
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"success": false, "error": err.Error()})
 		return
 	}
 	defer resp.Body.Close()
 
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	if resp.StatusCode >= 400 {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		c.JSON(http.StatusOK, gin.H{"success": false, "error": fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(raw))})
+		return
+	}
+
+	// API 返回 {"verifyConn": "1", "error_message": "..."}
+	var result map[string]interface{}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "error": "Invalid response from CyberPanel"})
+		return
+	}
+	if v, ok := result["verifyConn"]; !ok || fmt.Sprintf("%v", v) != "1" {
+		errMsg := "Authentication failed"
+		if em, ok := result["error_message"]; ok {
+			errMsg = fmt.Sprintf("%v", em)
+		}
+		c.JSON(http.StatusOK, gin.H{"success": false, "error": errMsg})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Connection successful"})
@@ -366,11 +402,11 @@ func (h *CyberPanelHandler) adminChangeAccountState(c *gin.Context, newStatus, c
 		domainName = account.Domain.FullDomain
 	}
 
-	if err := h.callCyberPanel(account.Server.URL, "/api/suspendWebsite", cpRequest{
-		AdminUser:  account.Server.AdminUser,
-		AdminPass:  adminPass,
-		DomainName: domainName,
-		State:      cpState,
+	if err := h.callCyberPanel(account.Server.URL, "/api/submitWebsiteStatus", cpRequest{
+		AdminUser:   account.Server.AdminUser,
+		AdminPass:   adminPass,
+		WebsiteName: domainName,
+		State:       cpState,
 	}); err != nil {
 		errMsg := err.Error()
 		h.db.Model(&account).Update("error_msg", errMsg)
@@ -636,11 +672,11 @@ func (h *CyberPanelHandler) changeAccountStatus(account *models.CyberPanelAccoun
 	if account.Domain != nil {
 		domainName = account.Domain.FullDomain
 	}
-	if err := h.callCyberPanel(account.Server.URL, "/api/suspendWebsite", cpRequest{
-		AdminUser:  account.Server.AdminUser,
-		AdminPass:  adminPass,
-		DomainName: domainName,
-		State:      cpState,
+	if err := h.callCyberPanel(account.Server.URL, "/api/submitWebsiteStatus", cpRequest{
+		AdminUser:   account.Server.AdminUser,
+		AdminPass:   adminPass,
+		WebsiteName: domainName,
+		State:       cpState,
 	}); err != nil {
 		fmt.Printf("Warning: CyberPanel %s failed for account %d: %v\n", cpState, account.ID, err)
 		return
