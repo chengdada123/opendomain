@@ -133,7 +133,7 @@
 
           </div>
 
-          <div v-if="domain.status !== 'suspended'" class="card-actions justify-end mt-4 flex-wrap gap-2">
+          <div class="card-actions justify-end mt-4 flex-wrap gap-2">
             <button
               v-if="domain.status === 'active'"
               class="btn btn-sm"
@@ -191,7 +191,7 @@
                   <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                   </svg>
-                  Delete
+                  {{ $t('admin.delete') }}
                 </a></li>
               </ul>
             </div>
@@ -1129,13 +1129,39 @@ const createCpAccount = async () => {
   }
 }
 
+const cpFormLogin = (username, password, loginUrl) => {
+  // 打开命名窗口，先 POST 到 /api/loginAPI（免 CSRF）建立 session cookie，
+  // 再导航到 /dashboard/，浏览器会携带已设置的 cookie
+  const winName = 'cpanel_' + Date.now()
+  const cpWindow = window.open('about:blank', winName)
+  const form = document.createElement('form')
+  form.method = 'POST'
+  form.action = `${loginUrl}/api/loginAPI`
+  form.target = winName
+  ;[['username', username], ['password', password]].forEach(([name, value]) => {
+    const input = document.createElement('input')
+    input.type = 'hidden'
+    input.name = name
+    input.value = value
+    form.appendChild(input)
+  })
+  document.body.appendChild(form)
+  form.submit()
+  document.body.removeChild(form)
+  // 等待 loginAPI 响应后（cookie 已写入浏览器），跳转到面板
+  setTimeout(() => {
+    if (cpWindow && !cpWindow.closed) {
+      cpWindow.location.href = `${loginUrl}/dashboard/`
+    }
+  }, 1500)
+}
+
 const openCpPanel = async (acc) => {
   cpCredentialsLoading.value = true
   try {
     const res = await axios.get(`/api/cyberpanel/accounts/${acc.id}/autologin`)
-    if (res.data.redirect_url) {
-      window.open(res.data.redirect_url, '_blank', 'noopener')
-    }
+    const { username, password, login_url } = res.data
+    cpFormLogin(username, password, login_url)
   } catch (e) {
     toast.error(e.response?.data?.error || 'Failed to auto-login')
   } finally {

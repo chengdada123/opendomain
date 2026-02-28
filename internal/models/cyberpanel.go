@@ -52,7 +52,7 @@ type CyberPanelServerRequest struct {
 	Name        string  `json:"name" binding:"required,max=100"`
 	URL         string  `json:"url" binding:"required"`
 	AdminUser   string  `json:"admin_user" binding:"required"`
-	AdminPass   string  `json:"admin_pass" binding:"required"`
+	AdminPass   string  `json:"admin_pass"` // 更新时可留空表示不修改密码
 	PackageName string  `json:"package_name" binding:"required"`
 	IsActive    *bool   `json:"is_active"`
 	IsDefault   *bool   `json:"is_default"`

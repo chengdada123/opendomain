@@ -647,6 +647,7 @@ export default {
     cpCreatedAt: '创建时间',
     cpTest: '测连',
     cpTestSuccess: '连接成功',
+    cpOpenPanel: '打开面板',
     cpTerminate: '删除主机',
     cpTerminateTitle: '确认删除主机',
     cpTerminateConfirm: '确认删除 {domain} 的主机账号？此操作不可撤销。',

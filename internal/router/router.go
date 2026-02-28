@@ -259,6 +259,7 @@ func Setup(db *gorm.DB, rdb *redis.Client, cfg *config.Config) *gin.Engine {
 				cpAdmin.PUT("/servers/:id", cyberPanelHandler.AdminUpdateServer)
 				cpAdmin.DELETE("/servers/:id", cyberPanelHandler.AdminDeleteServer)
 				cpAdmin.POST("/servers/:id/test", cyberPanelHandler.AdminTestServer)
+				cpAdmin.GET("/servers/:id/autologin", cyberPanelHandler.AdminAutoLogin)
 				cpAdmin.GET("/accounts", cyberPanelHandler.AdminListAccounts)
 				cpAdmin.POST("/accounts/:id/suspend", cyberPanelHandler.AdminSuspendAccount)
 				cpAdmin.POST("/accounts/:id/unsuspend", cyberPanelHandler.AdminUnsuspendAccount)

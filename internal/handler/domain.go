@@ -834,9 +834,9 @@ func (h *DomainHandler) DeleteDomain(c *gin.Context) {
 		return
 	}
 
-	if domain.Status == "suspended" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "This domain has been suspended. All operations are disabled."})
-		return
+	// 终止关联的 CyberPanel 主机账号
+	if h.cpHandler != nil {
+		h.cpHandler.TerminateAccountByDomain(domain.ID)
 	}
 
 	// 删除所有 DNS 记录（从数据库和 PowerDNS）
@@ -1806,6 +1806,11 @@ func (h *DomainHandler) AdminDeleteDomain(c *gin.Context) {
 	if err := h.db.Preload("RootDomain").First(&domain, domainID).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Domain not found"})
 		return
+	}
+
+	// 终止关联的 CyberPanel 主机账号
+	if h.cpHandler != nil {
+		h.cpHandler.TerminateAccountByDomain(domain.ID)
 	}
 
 	// 删除所有 DNS 记录（从数据库和 PowerDNS）

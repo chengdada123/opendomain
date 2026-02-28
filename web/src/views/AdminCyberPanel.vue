@@ -89,6 +89,10 @@
                     <span v-if="testingId === server.id" class="loading loading-spinner loading-xs"></span>
                     <span v-else>{{ $t('admin.cpTest') }}</span>
                   </button>
+                  <button @click="openServerPanel(server)" class="btn btn-xs btn-primary" :disabled="openingPanelId === server.id">
+                    <span v-if="openingPanelId === server.id" class="loading loading-spinner loading-xs"></span>
+                    <span v-else>{{ $t('admin.cpOpenPanel') }}</span>
+                  </button>
                   <button @click="openEditServer(server)" class="btn btn-xs btn-ghost">{{ $t('admin.edit') }}</button>
                   <button @click="confirmDeleteServer(server)" class="btn btn-xs btn-error">{{ $t('admin.delete') }}</button>
                 </div>
@@ -307,6 +311,7 @@ const editingServer = ref(null)
 const serverSaving = ref(false)
 const serverModalError = ref('')
 const testingId = ref(null)
+const openingPanelId = ref(null)
 const showDeleteServerConfirm = ref(false)
 const deletingServer = ref(null)
 
@@ -445,6 +450,46 @@ const testServer = async (server) => {
     showToast(e.response?.data?.error || 'Test failed', 'error')
   } finally {
     testingId.value = null
+  }
+}
+
+const cpFormLogin = (username, password, loginUrl) => {
+  // 打开命名窗口，先 POST 到 /api/loginAPI（免 CSRF）建立 session cookie，
+  // 再导航到 /dashboard/，浏览器会携带已设置的 cookie
+  const winName = 'cpanel_' + Date.now()
+  const cpWindow = window.open('about:blank', winName)
+  const form = document.createElement('form')
+  form.method = 'POST'
+  form.action = `${loginUrl}/api/loginAPI`
+  form.target = winName
+  ;[['username', username], ['password', password]].forEach(([name, value]) => {
+    const input = document.createElement('input')
+    input.type = 'hidden'
+    input.name = name
+    input.value = value
+    form.appendChild(input)
+  })
+  document.body.appendChild(form)
+  form.submit()
+  document.body.removeChild(form)
+  // 等待 loginAPI 响应后（cookie 已写入浏览器），跳转到面板
+  setTimeout(() => {
+    if (cpWindow && !cpWindow.closed) {
+      cpWindow.location.href = `${loginUrl}/dashboard/`
+    }
+  }, 1500)
+}
+
+const openServerPanel = async (server) => {
+  openingPanelId.value = server.id
+  try {
+    const res = await axios.get(`/api/admin/cyberpanel/servers/${server.id}/autologin`)
+    const { username, password, login_url } = res.data
+    cpFormLogin(username, password, login_url)
+  } catch (e) {
+    showToast(e.response?.data?.error || 'Login failed', 'error')
+  } finally {
+    openingPanelId.value = null
   }
 }
 

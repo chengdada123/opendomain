@@ -647,6 +647,7 @@ export default {
     cpCreatedAt: 'Created At',
     cpTest: 'Test',
     cpTestSuccess: 'Connection successful',
+    cpOpenPanel: 'Open Panel',
     cpTerminate: 'Terminate',
     cpTerminateTitle: 'Confirm Terminate',
     cpTerminateConfirm: 'Terminate hosting account for {domain}? This cannot be undone.',

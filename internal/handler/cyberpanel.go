@@ -42,8 +42,10 @@ type cpRequest struct {
 	PackageName   string `json:"packageName,omitempty"`
 	OwnerEmail    string `json:"ownerEmail,omitempty"`
 	WebsiteOwner  string `json:"websiteOwner,omitempty"`
+	ModifiedUser  string `json:"modifiedUser,omitempty"`
 	OwnerPassword string `json:"ownerPassword,omitempty"`
 	State         string `json:"state,omitempty"`
+	WebsitesLimit int    `json:"websitesLimit,omitempty"`
 }
 
 // generateCpUsername 根据用户名和 ID 自动生成 CyberPanel 登录名
@@ -210,6 +212,10 @@ func (h *CyberPanelHandler) AdminCreateServer(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if req.AdminPass == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "admin_pass is required"})
+		return
+	}
 
 	encPass, err := h.encryptPass(req.AdminPass)
 	if err != nil {
@@ -332,6 +338,29 @@ func (h *CyberPanelHandler) AdminDeleteServer(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "Server and all associated accounts deleted"})
+}
+
+// AdminAutoLogin GET /api/admin/cyberpanel/servers/:id/autologin
+// 返回服务器 admin 凭据供浏览器直接 POST 登录（session cookie 在浏览器侧建立）
+func (h *CyberPanelHandler) AdminAutoLogin(c *gin.Context) {
+	serverID := c.Param("id")
+	var server models.CyberPanelServer
+	if err := h.db.First(&server, serverID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Server not found"})
+		return
+	}
+
+	adminPass, err := h.decryptPass(server.AdminPass)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decrypt password"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"username":  server.AdminUser,
+		"password":  adminPass,
+		"login_url": strings.TrimRight(server.URL, "/"),
+	})
 }
 
 // AdminTestServer POST /api/admin/cyberpanel/servers/:id/test
@@ -499,15 +528,13 @@ func (h *CyberPanelHandler) AdminTerminateAccount(c *gin.Context) {
 	}
 
 	h.terminateAccount(&account)
+	h.db.Unscoped().Delete(&account)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Account terminated"})
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// 用户接口
-// ════════════════════════════════════════════════════════════════════════════
-
-// ListPublicServers GET /api/cyberpanel/servers — 列出对用户可见的活跃服务器（无敏感信息）
+// 用户接口 GET /api/cyberpanel/servers — 列出对用户可见的活跃服务器（无敏感信息）
 func (h *CyberPanelHandler) ListPublicServers(c *gin.Context) {
 	var servers []models.CyberPanelServer
 	h.db.Where("is_active = ?", true).Order("is_default DESC, id ASC").Find(&servers)
@@ -592,7 +619,7 @@ func (h *CyberPanelHandler) CreateAccount(c *gin.Context) {
 
 	// 域名是否已绑定账号
 	var existingCount int64
-	h.db.Model(&models.CyberPanelAccount{}).Where("domain_id = ?", domain.ID).Count(&existingCount)
+	h.db.Model(&models.CyberPanelAccount{}).Where("domain_id = ? AND status != ?", domain.ID, "terminated").Count(&existingCount)
 	if existingCount > 0 {
 		c.JSON(http.StatusConflict, gin.H{"error": "This domain already has a hosting account"})
 		return
@@ -621,8 +648,8 @@ func (h *CyberPanelHandler) CreateAccount(c *gin.Context) {
 	var encPass string
 
 	var sibling models.CyberPanelAccount
-	if err := h.db.Where("user_id = ? AND server_id = ? AND status != ?", userID, server.ID, "terminated").
-		First(&sibling).Error; err == nil {
+	if sibErr := h.db.Where("user_id = ? AND server_id = ? AND status != ?", userID, server.ID, "terminated").
+		First(&sibling).Error; sibErr == nil {
 		// 复用已有凭据
 		cpUsername = sibling.CpUsername
 		encPass = sibling.CpPassword
@@ -670,6 +697,13 @@ func (h *CyberPanelHandler) CreateAccount(c *gin.Context) {
 		return
 	}
 
+	// websitesLimit: 使用用户在 OpenDomain 的 DomainQuota 作为 CyberPanel 网站上限，
+	// createWebsite 只在新建 CP 用户时应用此值，复用已有用户时此字段被忽略。
+	cpWebsitesLimit := user.DomainQuota
+	if cpWebsitesLimit < 1 {
+		cpWebsitesLimit = 1
+	}
+
 	cpErr := h.callCyberPanel(server.URL, "/api/createWebsite", cpRequest{
 		AdminUser:     server.AdminUser,
 		AdminPass:     adminPass,
@@ -678,17 +712,13 @@ func (h *CyberPanelHandler) CreateAccount(c *gin.Context) {
 		OwnerEmail:    user.Email,
 		WebsiteOwner:  cpUsername,
 		OwnerPassword: cpPassword,
+		WebsitesLimit: cpWebsitesLimit,
 	})
 
 	if cpErr != nil {
 		errMsg := cpErr.Error()
-		h.db.Model(&account).Updates(map[string]interface{}{"status": "pending", "error_msg": errMsg})
-		acc := h.loadAccount(account.ID)
-		resp := h.toAccountResponse(*acc)
-		c.JSON(http.StatusCreated, gin.H{
-			"account": resp,
-			"warning": "Account created but CyberPanel provisioning failed: " + errMsg,
-		})
+		h.db.Unscoped().Delete(&account) // 回滚记录，允许重试
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "CyberPanel provisioning failed: " + errMsg})
 		return
 	}
 
@@ -735,7 +765,7 @@ func (h *CyberPanelHandler) GetAccountCredentials(c *gin.Context) {
 }
 
 // AutoLogin GET /api/cyberpanel/accounts/:id/autologin
-// 调用 CyberPanel /api/loginAPI，返回含 session 的跳转 URL，密码不下发前端
+// 返回用户 CP 凭据供浏览器直接 POST 登录（session cookie 在浏览器侧建立）
 func (h *CyberPanelHandler) AutoLogin(c *gin.Context) {
 	userID, exists := middleware.GetUserID(c)
 	if !exists {
@@ -760,45 +790,11 @@ func (h *CyberPanelHandler) AutoLogin(c *gin.Context) {
 		return
 	}
 
-	payload, _ := json.Marshal(map[string]string{
-		"username": account.CpUsername,
-		"password": cpPassword,
+	c.JSON(http.StatusOK, gin.H{
+		"username":  account.CpUsername,
+		"password":  cpPassword,
+		"login_url": strings.TrimRight(account.Server.URL, "/"),
 	})
-	req, err := http.NewRequest(http.MethodPost, account.Server.URL+"/api/loginAPI", bytes.NewReader(payload))
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to build login request"})
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := cpHTTPClient(15 * time.Second).Do(req)
-	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "CyberPanel login request failed: " + err.Error()})
-		return
-	}
-	defer resp.Body.Close()
-
-	var result map[string]interface{}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&result); err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "Failed to parse CyberPanel response"})
-		return
-	}
-
-	if errMsg, ok := result["error_message"].(string); ok && errMsg != "" && errMsg != "None" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": errMsg})
-		return
-	}
-
-	// CyberPanel 返回相对路径，拼接服务器地址
-	redirectPath, _ := result["redirect"].(string)
-	if redirectPath == "" {
-		redirectPath = "/dashboard/"
-	}
-	baseURL := strings.TrimRight(account.Server.URL, "/")
-	if strings.HasPrefix(redirectPath, "http") {
-		c.JSON(http.StatusOK, gin.H{"redirect_url": redirectPath})
-	} else {
-		c.JSON(http.StatusOK, gin.H{"redirect_url": baseURL + "/" + strings.TrimLeft(redirectPath, "/")})
-	}
 }
 
 // DeleteMyAccount DELETE /api/cyberpanel/accounts/:id
@@ -819,6 +815,7 @@ func (h *CyberPanelHandler) DeleteMyAccount(c *gin.Context) {
 	}
 
 	h.terminateAccount(&account)
+	h.db.Unscoped().Delete(&account)
 	c.JSON(http.StatusOK, gin.H{"message": "Account terminated"})
 }
 
@@ -873,6 +870,18 @@ func (h *CyberPanelHandler) UnsuspendAccountByDomain(domainID uint) {
 		return
 	}
 	h.changeAccountStatus(&account, "active", "Active")
+}
+
+// TerminateAccountByDomain 由 domain handler 调用：域名删除时终止对应的 CyberPanel 账号
+func (h *CyberPanelHandler) TerminateAccountByDomain(domainID uint) {
+	var account models.CyberPanelAccount
+	if err := h.db.Preload("Server").Preload("Domain").
+		Where("domain_id = ? AND status != ?", domainID, "terminated").
+		First(&account).Error; err != nil {
+		return // 没有关联账号，忽略
+	}
+	h.terminateAccount(&account)
+	h.db.Unscoped().Delete(&account)
 }
 
 func (h *CyberPanelHandler) changeAccountStatus(account *models.CyberPanelAccount, newStatus, cpState string) {
