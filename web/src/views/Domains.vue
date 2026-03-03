@@ -229,14 +229,27 @@
                 <button @click="copyText(cpAccountByDomain[cpModalDomain.id].cp_username)" class="btn btn-xs btn-ghost">Copy</button>
               </div>
             </div>
-          </div>
-
-          <!-- 按需加载的密码 -->
-          <div v-if="cpCredentials" class="bg-base-200 rounded-lg p-3 text-sm">
-            <p class="opacity-60 text-xs mb-1">{{ $t('domains.cpHostingPassword') }}</p>
-            <div class="flex items-center justify-between">
-              <p class="font-mono font-bold tracking-wider">{{ cpCredentials.cp_password }}</p>
-              <button @click="copyText(cpCredentials.cp_password)" class="btn btn-xs btn-ghost">Copy</button>
+            <!-- 密码行 -->
+            <div class="bg-base-200 rounded-lg p-3 col-span-2">
+              <p class="opacity-60 text-xs mb-1">{{ $t('domains.cpHostingPassword') }}</p>
+              <div class="flex items-center justify-between gap-2">
+                <p class="font-mono font-bold tracking-wider flex-1">
+                  <span v-if="cpCredentials">{{ showCpPassword ? cpCredentials.cp_password : '••••••••' }}</span>
+                  <span v-else class="opacity-40 text-xs">{{ $t('domains.cpPasswordHidden') }}</span>
+                </p>
+                <div class="flex gap-1">
+                  <button
+                    @click="fetchCpCredentials(cpAccountByDomain[cpModalDomain.id])"
+                    class="btn btn-xs btn-ghost"
+                    :disabled="cpCredentialsLoading"
+                  >
+                    <span v-if="cpCredentialsLoading" class="loading loading-spinner loading-xs"></span>
+                    <span v-else-if="!cpCredentials">{{ $t('domains.cpPasswordShow') }}</span>
+                    <span v-else>{{ showCpPassword ? $t('domains.cpPasswordHide') : $t('domains.cpPasswordShow') }}</span>
+                  </button>
+                  <button v-if="cpCredentials" @click="copyText(cpCredentials.cp_password)" class="btn btn-xs btn-ghost">Copy</button>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -1060,6 +1073,7 @@ const cpSubmitting = ref(false)
 const cpFormError = ref('')
 const cpCredentials = ref(null)       // { cp_username, cp_password, login_url }
 const cpCredentialsLoading = ref(false)
+const showCpPassword = ref(false)
 
 const cpAccountByDomain = computed(() => {
   const map = {}
@@ -1074,6 +1088,7 @@ const cpAccountByDomain = computed(() => {
 const closeCpModal = () => {
   showCpModal.value = false
   cpCredentials.value = null
+  showCpPassword.value = false
 }
 
 const fetchCpAccounts = async () => {
@@ -1156,12 +1171,38 @@ const cpFormLogin = (username, password, loginUrl) => {
   }, 1500)
 }
 
-const openCpPanel = async (acc) => {
+const fetchCpCredentials = async (acc) => {
+  if (cpCredentials.value) {
+    // 已加载，仅切换显示/隐藏
+    showCpPassword.value = !showCpPassword.value
+    return
+  }
   cpCredentialsLoading.value = true
   try {
     const res = await axios.get(`/api/cyberpanel/accounts/${acc.id}/autologin`)
     const { username, password, login_url } = res.data
-    cpFormLogin(username, password, login_url)
+    cpCredentials.value = { cp_username: username, cp_password: password, login_url }
+    showCpPassword.value = true
+  } catch (e) {
+    toast.error(e.response?.data?.error || 'Failed to fetch credentials')
+  } finally {
+    cpCredentialsLoading.value = false
+  }
+}
+
+const openCpPanel = async (acc) => {
+  cpCredentialsLoading.value = true
+  try {
+    // 若已缓存凭据直接复用，否则请求
+    let creds = cpCredentials.value
+    if (!creds) {
+      const res = await axios.get(`/api/cyberpanel/accounts/${acc.id}/autologin`)
+      const { username, password, login_url } = res.data
+      creds = { cp_username: username, cp_password: password, login_url }
+      cpCredentials.value = creds
+      showCpPassword.value = true
+    }
+    cpFormLogin(creds.cp_username, creds.cp_password, creds.login_url)
   } catch (e) {
     toast.error(e.response?.data?.error || 'Failed to auto-login')
   } finally {
