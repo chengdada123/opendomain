@@ -231,6 +231,8 @@ export default {
     confirmDelete: 'Confirm Delete',
     deleteWarning: 'Are you sure you want to delete this domain? This action cannot be undone.',
     deleteWarningDomain: 'Are you sure you want to delete {domain}? This action cannot be undone.',
+    deleteTypeConfirm: 'Type the full domain name below to confirm deletion. This action is irreversible.',
+    deleteTypeConfirmPlaceholder: 'Type domain name to confirm',
     deleteSuccess: 'Domain deleted successfully',
     deleteFailed: 'Failed to delete domain',
     transferSuccess: 'Domain transferred successfully',

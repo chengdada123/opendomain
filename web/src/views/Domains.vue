@@ -176,26 +176,26 @@
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
                 </svg>
               </label>
-              <ul tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-52">
-                <li><a @click="openModifyNS(domain)">
+              <ul tabindex="0" class="dropdown-content z-[9999] menu p-2 shadow-lg bg-base-100 rounded-box w-52">
+                <li><a @click="openModifyNS(domain)" class="flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer hover:bg-base-200 active:bg-base-300">
                   <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
                   </svg>
                   {{ $t('domains.modifyNameservers') }}
                 </a></li>
-                <li><a @click="openRenew(domain)">
+                <li><a @click="openRenew(domain)" class="flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer hover:bg-base-200 active:bg-base-300">
                   <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                   </svg>
                   {{ $t('domains.renewDomainTitle') }}
                 </a></li>
-                <li><a @click="openTransfer(domain)">
+                <li><a @click="openTransfer(domain)" class="flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer hover:bg-base-200 active:bg-base-300">
                   <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
                   </svg>
                   {{ $t('domains.transferDomainTitle') }}
                 </a></li>
-                <li><a @click="confirmDelete(domain)" class="text-error">
+                <li><a @click="confirmDelete(domain)" class="flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer text-error hover:bg-error hover:text-error-content active:bg-error/80">
                   <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                   </svg>
@@ -998,6 +998,33 @@
         <button type="button" @click="closeScanDetailsModal">close</button>
       </form>
     </dialog>
+
+    <!-- Delete Domain Confirm Modal -->
+    <dialog :class="{ 'modal': true, 'modal-open': showDeleteModal }">
+      <div class="modal-box">
+        <h3 class="font-bold text-xl text-error mb-2">{{ $t('domains.confirmDelete') }}</h3>
+        <p class="text-sm opacity-70 mb-1">{{ $t('domains.deleteTypeConfirm') }}</p>
+        <p class="font-mono font-bold text-base mb-4">{{ deleteTargetDomain?.full_domain }}</p>
+        <input
+          v-model="deleteConfirmInput"
+          type="text"
+          class="input input-bordered w-full mb-4"
+          :placeholder="$t('domains.deleteTypeConfirmPlaceholder')"
+          @keyup.enter="executeDelete"
+        />
+        <div class="modal-action">
+          <button class="btn" @click="showDeleteModal = false">{{ $t('common.cancel') }}</button>
+          <button
+            class="btn btn-error"
+            :disabled="deleteConfirmInput !== deleteTargetDomain?.full_domain"
+            @click="executeDelete"
+          >{{ $t('domains.delete') }}</button>
+        </div>
+      </div>
+      <form method="dialog" class="modal-backdrop">
+        <button type="button" @click="showDeleteModal = false">close</button>
+      </form>
+    </dialog>
   </div>
 </template>
 
@@ -1036,6 +1063,9 @@ const showTransferModal = ref(false)
 const showSyncModal = ref(false)
 const showScanDetailsModal = ref(false)
 const showHealthDetailsModal = ref(false)
+const showDeleteModal = ref(false)
+const deleteTargetDomain = ref(null)
+const deleteConfirmInput = ref('')
 const selectedDomain = ref(null)
 
 // NS modification
@@ -1565,15 +1595,21 @@ const closeTransferModal = () => {
 }
 
 // Delete Domain
-const confirmDelete = async (domain) => {
-  if (confirm(t('domains.deleteWarningDomain', { domain: domain.full_domain }))) {
-    try {
-      await axios.delete(`/api/domains/${domain.id}`)
-      toast.success(t('domains.deleteSuccess'))
-      await fetchDomains()
-    } catch (error) {
-      toast.error(error.response?.data?.error || t('domains.deleteFailed'))
-    }
+const confirmDelete = (domain) => {
+  deleteTargetDomain.value = domain
+  deleteConfirmInput.value = ''
+  showDeleteModal.value = true
+}
+
+const executeDelete = async () => {
+  if (deleteConfirmInput.value !== deleteTargetDomain.value?.full_domain) return
+  try {
+    await axios.delete(`/api/domains/${deleteTargetDomain.value.id}`)
+    showDeleteModal.value = false
+    toast.success(t('domains.deleteSuccess'))
+    await fetchDomains()
+  } catch (error) {
+    toast.error(error.response?.data?.error || t('domains.deleteFailed'))
   }
 }
 

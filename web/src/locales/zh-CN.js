@@ -231,6 +231,8 @@ export default {
     confirmDelete: '确认删除',
     deleteWarning: '确定要删除此域名吗？此操作无法撤销。',
     deleteWarningDomain: '确定要删除 {domain} 吗？此操作无法撤销。',
+    deleteTypeConfirm: '请输入完整域名以确认删除，此操作不可撤销',
+    deleteTypeConfirmPlaceholder: '输入完整域名以确认',
     deleteSuccess: '域名删除成功',
     deleteFailed: '域名删除失败',
     transferSuccess: '域名转移成功',
