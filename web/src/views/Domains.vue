@@ -40,7 +40,7 @@
     </div>
 
     <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-      <div v-for="domain in domains" :key="domain.id" class="card bg-base-200 shadow-xl hover:shadow-2xl transition-all" :class="{ 'opacity-60': domain.status === 'suspended' || domain.status === 'abuse' }">
+      <div v-for="domain in domains" :key="domain.id" class="card bg-base-200 shadow-xl hover:shadow-2xl transition-all overflow-visible" :class="{ 'opacity-60': domain.status === 'suspended' || domain.status === 'abuse' }">
         <div class="card-body">
           <h2 class="card-title text-lg break-all">
             {{ domain.full_domain }}
