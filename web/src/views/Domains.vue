@@ -40,7 +40,7 @@
     </div>
 
     <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-      <div v-for="domain in domains" :key="domain.id" class="card bg-base-200 shadow-xl hover:shadow-2xl transition-all" :class="{ 'opacity-60': domain.status === 'suspended' }">
+      <div v-for="domain in domains" :key="domain.id" class="card bg-base-200 shadow-xl hover:shadow-2xl transition-all" :class="{ 'opacity-60': domain.status === 'suspended' || domain.status === 'abuse' }">
         <div class="card-body">
           <h2 class="card-title text-lg break-all">
             {{ domain.full_domain }}
@@ -55,6 +55,14 @@
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
             </svg>
             <span>{{ $t('domains.suspendedNotice') }}</span>
+          </div>
+
+          <!-- Abuse Notice -->
+          <div v-if="domain.status === 'abuse'" class="alert alert-error py-2 text-sm">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            </svg>
+            <span>{{ $t('domains.abuseNotice') }}</span>
           </div>
 
           <!-- Pending Deletion Notice -->
@@ -1278,6 +1286,8 @@ const getStatusClass = (status) => {
       return 'bg-red-100 text-red-800'
     case 'suspended':
       return 'bg-amber-100 text-amber-800'
+    case 'abuse':
+      return 'bg-red-700 text-white'
     default:
       return 'bg-gray-100 text-gray-800'
   }

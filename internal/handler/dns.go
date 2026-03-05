@@ -135,8 +135,8 @@ func (h *DNSHandler) CreateRecord(c *gin.Context) {
 		return
 	}
 
-	if domain.Status == "suspended" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "This domain has been suspended. All operations are disabled."})
+	if domain.Status == "abuse" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "This domain has been flagged for abuse. All operations are disabled."})
 		return
 	}
 
@@ -244,8 +244,8 @@ func (h *DNSHandler) UpdateRecord(c *gin.Context) {
 		return
 	}
 
-	if domain.Status == "suspended" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "This domain has been suspended. All operations are disabled."})
+	if domain.Status == "abuse" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "This domain has been flagged for abuse. All operations are disabled."})
 		return
 	}
 
@@ -332,12 +332,12 @@ func (h *DNSHandler) DeleteRecord(c *gin.Context) {
 		return
 	}
 
-	if domain.Status == "suspended" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "This domain has been suspended. All operations are disabled."})
+	if domain.Status == "abuse" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "This domain has been flagged for abuse. All operations are disabled."})
 		return
 	}
 
-	// 获取记录信息（删除前）
+	// 获取 DNS 记录
 	var record models.DNSRecord
 	if err := h.db.Where("id = ? AND domain_id = ?", recordID, domainID).First(&record).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "DNS record not found"})

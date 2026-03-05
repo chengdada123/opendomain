@@ -18,12 +18,14 @@ import (
 	"opendomain/internal/config"
 	"opendomain/internal/models"
 	"opendomain/internal/services"
+	"opendomain/pkg/powerdns"
 	"opendomain/pkg/timeutil"
 )
 
 type Scanner struct {
-	db  *gorm.DB
-	cfg *config.Config
+	db   *gorm.DB
+	cfg  *config.Config
+	pdns *powerdns.Client
 
 	// VirusTotal 速率限制: 4 lookups/min, 500/day
 	vtMu             sync.Mutex
@@ -39,7 +41,11 @@ type Scanner struct {
 }
 
 func NewScanner(db *gorm.DB, cfg *config.Config) *Scanner {
-	s := &Scanner{db: db, cfg: cfg}
+	s := &Scanner{
+		db:   db,
+		cfg:  cfg,
+		pdns: powerdns.NewClient(cfg.PowerDNS.APIURL, cfg.PowerDNS.APIKey),
+	}
 
 	// 从数据库加载今天的配额使用情况
 	s.loadQuotaFromDB()
@@ -201,6 +207,78 @@ func (s *Scanner) gsbCheckDailyQuota() bool {
 // strPtr 返回字符串指针
 func strPtr(s string) *string {
 	return &s
+}
+
+// buildFQDN 构建 DNS 记录的 FQDN
+func buildFQDN(name, fullDomain string) string {
+	if name == "@" || name == "" {
+		return fullDomain
+	}
+	return name + "." + fullDomain
+}
+
+// deleteAbuseRecordsForDomain 删除滥用域名的所有 DNS 记录和 NS/Zone 记录
+// 同时清理 PowerDNS 中的 zone 或 NS 条目
+func (s *Scanner) deleteAbuseRecordsForDomain(domain *models.Domain) error {
+	// 确保加载了 RootDomain
+	if domain.RootDomain == nil {
+		var rd models.RootDomain
+		if err := s.db.First(&rd, domain.RootDomainID).Error; err != nil {
+			return fmt.Errorf("failed to load root domain: %w", err)
+		}
+		domain.RootDomain = &rd
+	}
+
+	subdomainFQDN := domain.FullDomain
+	rootDomain := domain.RootDomain.Domain
+
+	// 删除所有 DNS 记录（从 PowerDNS 和数据库）
+	var records []models.DNSRecord
+	if err := s.db.Where("domain_id = ?", domain.ID).Find(&records).Error; err != nil {
+		return fmt.Errorf("failed to query DNS records: %w", err)
+	}
+
+	if len(records) > 0 {
+		// 按 name+type 分组，批量删除
+		recordGroups := make(map[string]models.DNSRecord)
+		for _, r := range records {
+			key := fmt.Sprintf("%s|%s", r.Name, r.Type)
+			if _, exists := recordGroups[key]; !exists {
+				recordGroups[key] = r
+			}
+		}
+		for _, r := range recordGroups {
+			fqdn := buildFQDN(r.Name, subdomainFQDN)
+			if err := s.pdns.DeleteRRset(rootDomain, fqdn, r.Type); err != nil {
+				fmt.Printf("[WARNING] Failed to delete RRset %s/%s for abused domain: %v\n", fqdn, r.Type, err)
+			}
+		}
+		if err := s.db.Where("domain_id = ?", domain.ID).Delete(&models.DNSRecord{}).Error; err != nil {
+			return fmt.Errorf("failed to delete DNS records from database: %w", err)
+		}
+		fmt.Printf("[INFO] Deleted %d DNS record(s) for abused domain %s\n", len(records), subdomainFQDN)
+	}
+
+	// 清理 PowerDNS 中的 Zone 或 NS 记录
+	if domain.UseDefaultNameservers {
+		// 使用默认 NS：删除子域名独立 zone
+		if err := s.pdns.DeleteZone(subdomainFQDN); err != nil {
+			if !strings.Contains(err.Error(), "not found") && !strings.Contains(err.Error(), "Could not find") {
+				fmt.Printf("[WARNING] Failed to delete zone for abused domain %s: %v\n", subdomainFQDN, err)
+			}
+		} else {
+			fmt.Printf("[INFO] Deleted zone for abused domain %s\n", subdomainFQDN)
+		}
+	} else {
+		// 使用自定义 NS：删除在 root zone 中的 NS 记录
+		if err := s.pdns.DeleteRRset(rootDomain, subdomainFQDN, "NS"); err != nil {
+			fmt.Printf("[WARNING] Failed to delete NS records for abused domain %s: %v\n", subdomainFQDN, err)
+		} else {
+			fmt.Printf("[INFO] Deleted custom NS records for abused domain %s\n", subdomainFQDN)
+		}
+	}
+
+	return nil
 }
 
 // ScanAllDomains 扫描所有活跃域名（分批处理，遵守 API 速率限制）
@@ -801,7 +879,7 @@ func (s *Scanner) updateSummary(domainID uint, dnsStatus, httpStatus, sslStatus,
 // handleAutoActions 处理自动 suspend/delete 逻辑
 func (s *Scanner) handleAutoActions(domainID uint, safeBrowsingStatus, virusTotalStatus string, summary models.DomainScanSummary) {
 	var domain models.Domain
-	if err := s.db.First(&domain, domainID).Error; err != nil {
+	if err := s.db.Preload("RootDomain").First(&domain, domainID).Error; err != nil {
 		return
 	}
 
@@ -809,7 +887,22 @@ func (s *Scanner) handleAutoActions(domainID uint, safeBrowsingStatus, virusTota
 	telegram := services.NewTelegramService(s.cfg)
 	now := timeutil.Now()
 
-	// 1. 检测恶意内容 - 立即 suspend
+	// 0. 已处于 abuse 状态：仅处理30天自动删除，不做其他任何操作
+	if domain.Status == "abuse" {
+		if domain.SuspendedAt != nil {
+			daysSinceAbuse := int(now.Sub(*domain.SuspendedAt).Hours() / 24)
+			if daysSinceAbuse >= 30 {
+				s.db.Delete(&domain)
+				telegram.SendHealthAlert(domain.FullDomain,
+					[]string{"Domain has been in abuse status for 30+ days"},
+					"Domain DELETED - malicious content (auto-cleanup)")
+				fmt.Printf("[INFO] Abuse domain %s deleted after %d days\n", domain.FullDomain, daysSinceAbuse)
+			}
+		}
+		return
+	}
+
+	// 1. 检测恶意内容 - 立即标记为 abuse（比 suspended 更严重，用户不可操作）
 	// 但需要确认是真正的威胁检测，而不是 API 错误
 	if safeBrowsingStatus == "unsafe" || virusTotalStatus == "malicious" {
 		// 获取最新的扫描记录以确认
@@ -860,21 +953,26 @@ func (s *Scanner) handleAutoActions(domainID uint, safeBrowsingStatus, virusTota
 			}
 		}
 
-		// 只有在确认是真正的威胁时才挂起
+		// 只有在确认是真正的威胁时才进行处理
 		if !realThreat {
-			fmt.Printf("[WARNING] Domain %s marked as unsafe/malicious but latest scan shows API error, not suspending\n",
+			fmt.Printf("[WARNING] Domain %s marked as unsafe/malicious but latest scan shows API error, not marking as abuse\n",
 				domain.FullDomain)
 			fmt.Printf("[DEBUG] Scan details: %s\n", scanDetails)
 			return
 		}
 
-		if domain.Status != "suspended" {
+		if domain.Status != "abuse" {
 			now := time.Now()
-			domain.Status = "suspended"
-			domain.SuspendedAt = &now
+			domain.Status = "abuse"
+			domain.SuspendedAt = &now // 记录 abuse 开始时间，用于30天自动删除倒计时
 			reasonText := "Malicious content detected"
 			domain.SuspendReason = &reasonText
 			s.db.Save(&domain)
+
+			// 立即删除所有 DNS 记录和 NS/Zone
+			if err := s.deleteAbuseRecordsForDomain(&domain); err != nil {
+				fmt.Printf("[ERROR] Failed to delete records for abused domain %s: %v\n", domain.FullDomain, err)
+			}
 
 			reason := fmt.Sprintf("Malicious content detected (Safe Browsing: %s, VirusTotal: %s)\nScan details: %s",
 				safeBrowsingStatus, virusTotalStatus, scanDetails)
@@ -882,14 +980,15 @@ func (s *Scanner) handleAutoActions(domainID uint, safeBrowsingStatus, virusTota
 			// 记录 suspend 历史
 			history := models.SuspendHistory{
 				DomainID: domain.ID,
-				Reason:   "Malicious content detected",
+				Reason:   "Malicious content detected - domain marked as abuse",
 				Details:  reason,
 			}
 			if err := s.db.Create(&history).Error; err != nil {
 				fmt.Printf("[ERROR] Failed to create suspend history for domain %s: %v\n", domain.FullDomain, err)
 			}
 
-			telegram.SendAutoSuspendNotification(domain.FullDomain, reason)
+			telegram.SendAutoSuspendNotification(domain.FullDomain,
+				fmt.Sprintf("[ABUSE] %s\nAll DNS records deleted. Domain will be automatically deleted in 30 days.", reason))
 		}
 		return
 	}

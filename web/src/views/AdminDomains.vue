@@ -50,6 +50,14 @@
         <div class="stat-title">已暂停</div>
         <div class="stat-value text-warning">{{ stats.suspended || 0 }}</div>
       </div>
+      <div 
+        class="stat bg-base-100 rounded-lg shadow cursor-pointer hover:shadow-lg transition-shadow"
+        :class="{ 'ring-2 ring-error': statusFilter === 'abuse' }"
+        @click="filterByStatus('abuse')"
+      >
+        <div class="stat-title">滥用</div>
+        <div class="stat-value text-error">{{ stats.abuse || 0 }}</div>
+      </div>
     </div>
 
     <!-- Search Bar -->
@@ -128,7 +136,8 @@
               <span :class="['px-2 py-0.5 rounded text-xs font-medium',
                 domain.status === 'active' ? 'bg-green-100 text-green-800' :
                 domain.status === 'suspended' ? 'bg-orange-100 text-orange-800' :
-                domain.status === 'expired' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800']">
+                domain.status === 'expired' ? 'bg-red-100 text-red-800' :
+                domain.status === 'abuse' ? 'bg-red-700 text-white' : 'bg-gray-100 text-gray-800']">
                 {{ domain.status }}
               </span>
             </td>
@@ -363,7 +372,8 @@ const stats = ref({
   total: 0,
   active: 0,
   expired: 0,
-  suspended: 0
+  suspended: 0,
+  abuse: 0
 })
 const pagination = ref({
   page: 1,

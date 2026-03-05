@@ -876,8 +876,8 @@ func (h *DomainHandler) ModifyNameservers(c *gin.Context) {
 		return
 	}
 
-	if domain.Status == "suspended" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "This domain has been suspended. All operations are disabled."})
+	if domain.Status == "abuse" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "This domain has been flagged for abuse. All operations are disabled."})
 		return
 	}
 
@@ -952,8 +952,8 @@ func (h *DomainHandler) RenewDomain(c *gin.Context) {
 		return
 	}
 
-	if domain.Status == "suspended" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "This domain has been suspended. All operations are disabled."})
+	if domain.Status == "abuse" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "This domain has been flagged for abuse. All operations are disabled."})
 		return
 	}
 
@@ -1204,8 +1204,8 @@ func (h *DomainHandler) TransferDomain(c *gin.Context) {
 		return
 	}
 
-	if domain.Status == "suspended" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "This domain has been suspended. All operations are disabled."})
+	if domain.Status == "abuse" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "This domain has been flagged for abuse. All operations are disabled."})
 		return
 	}
 
@@ -1290,7 +1290,7 @@ func (h *DomainHandler) ListAllDomains(c *gin.Context) {
 	domainQuery := h.db.Preload("RootDomain").Preload("User")
 
 	// 状态筛选
-	if status != "" && (status == "active" || status == "expired" || status == "suspended") {
+	if status != "" && (status == "active" || status == "expired" || status == "suspended" || status == "abuse") {
 		domainQuery = domainQuery.Where("status = ?", status)
 	}
 
@@ -1346,6 +1346,7 @@ func (h *DomainHandler) GetDomainStatusStats(c *gin.Context) {
 		"active":    0,
 		"expired":   0,
 		"suspended": 0,
+		"abuse":     0,
 	}
 
 	for _, stat := range stats {
@@ -1363,6 +1364,7 @@ func (h *DomainHandler) GetDomainStatusStats(c *gin.Context) {
 		"active":    statusMap["active"],
 		"expired":   statusMap["expired"],
 		"suspended": statusMap["suspended"],
+		"abuse":     statusMap["abuse"],
 	})
 }
 
