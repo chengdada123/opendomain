@@ -1072,12 +1072,16 @@ func (h *DomainHandler) RenewDomain(c *gin.Context) {
 			}
 
 			// 更新域名过期时间
+			maxExpiry := time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC)
 			var newExpiry time.Time
 			if req.IsLifetime {
 				// Lifetime: 设置为100年后
 				newExpiry = domain.ExpiresAt.AddDate(100, 0, 0)
 			} else {
 				newExpiry = domain.ExpiresAt.AddDate(req.Years, 0, 0)
+			}
+			if newExpiry.After(maxExpiry) {
+				newExpiry = maxExpiry
 			}
 
 			if err := h.db.Model(&domain).Update("expires_at", newExpiry).Error; err != nil {
@@ -1116,7 +1120,11 @@ func (h *DomainHandler) RenewDomain(c *gin.Context) {
 	}
 
 	// 免费域名直接续费
+	maxExpiry := time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC)
 	newExpiry := domain.ExpiresAt.AddDate(req.Years, 0, 0)
+	if newExpiry.After(maxExpiry) {
+		newExpiry = maxExpiry
+	}
 	if err := h.db.Model(&domain).Update("expires_at", newExpiry).Error; err != nil {
 		fmt.Printf("Failed to update free domain expires_at: %v\n", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to renew domain", "details": err.Error()})

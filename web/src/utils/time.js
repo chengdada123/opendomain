@@ -31,7 +31,12 @@ export function formatDateTime(dateString, options = {}) {
   
   const finalOptions = { ...defaultOptions, ...options }
   
-  return new Intl.DateTimeFormat(undefined, finalOptions).format(date)
+  try {
+    return new Intl.DateTimeFormat(undefined, finalOptions).format(date)
+  } catch (e) {
+    // 日期年份超出范围（如续费到9999年以后），降级显示 ISO 日期
+    return date.toISOString().replace('T', ' ').substring(0, 19)
+  }
 }
 
 /**
@@ -46,11 +51,16 @@ export function formatDate(dateString) {
   
   if (isNaN(date.getTime())) return 'Invalid Date'
   
-  return new Intl.DateTimeFormat(undefined, {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  }).format(date)
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(date)
+  } catch (e) {
+    // 日期年份超出范围（如续费到9999年以后），降级显示 ISO 日期
+    return date.toISOString().substring(0, 10)
+  }
 }
 
 /**

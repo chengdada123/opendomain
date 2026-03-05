@@ -424,12 +424,16 @@ func (h *PaymentHandler) processSuccessfulPayment(
 			}
 
 			// 计算新的过期时间（从当前过期时间延长）
+			maxExpiry := time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC)
 			var newExpiresAt time.Time
 			if order.IsLifetime {
 				// 永久域名设置为100年后
 				newExpiresAt = domain.ExpiresAt.AddDate(100, 0, 0)
 			} else {
 				newExpiresAt = domain.ExpiresAt.AddDate(order.Years, 0, 0)
+			}
+			if newExpiresAt.After(maxExpiry) {
+				newExpiresAt = maxExpiry
 			}
 
 			// 更新域名过期时间
@@ -763,12 +767,16 @@ func (h *PaymentHandler) createDomainFromOrder(tx *gorm.DB, order *models.Order)
 		}
 
 		// 计算新的过期时间（从当前过期时间延长）
+		maxExpiry := time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC)
 		var newExpiresAt time.Time
 		if order.IsLifetime {
 			// 永久域名设置为100年后
 			newExpiresAt = domain.ExpiresAt.AddDate(100, 0, 0)
 		} else {
 			newExpiresAt = domain.ExpiresAt.AddDate(order.Years, 0, 0)
+		}
+		if newExpiresAt.After(maxExpiry) {
+			newExpiresAt = maxExpiry
 		}
 
 		// 更新域名过期时间
