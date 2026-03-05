@@ -39,109 +39,117 @@
       </div>
     </div>
 
-    <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-      <div v-for="domain in domains" :key="domain.id" class="card bg-base-200 shadow-xl hover:shadow-2xl transition-all overflow-visible" :class="{ 'opacity-60': domain.status === 'suspended' || domain.status === 'abuse' }">
-        <div class="card-body">
-          <h2 class="card-title text-lg break-all">
-            {{ domain.full_domain }}
-            <div class="px-2 py-0.5 rounded text-xs font-medium" :class="getStatusClass(domain.status)">
-              {{ domain.status }}
+    <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div v-for="domain in domains" :key="domain.id" class="card bg-base-100 border border-base-300 shadow-sm hover:shadow-md transition-shadow overflow-visible">
+        <div class="card-body p-5 gap-0">
+          <!-- Content wrapper: opacity applied here so card-actions/dropdown stacking context is not affected -->
+          <div :class="{ 'opacity-50': domain.status === 'suspended' || domain.status === 'abuse' }">
+
+            <!-- Header: domain name + status badge -->
+            <div class="flex items-start justify-between gap-3 mb-4">
+              <h2 class="text-sm font-semibold text-base-content leading-snug break-all" style="font-family: 'IBM Plex Mono', monospace; letter-spacing: -0.01em;">
+                {{ domain.full_domain }}
+              </h2>
+              <!-- Suspended badge: clickable to show details -->
+              <button
+                v-if="domain.status === 'suspended'"
+                class="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium cursor-pointer hover:opacity-80 transition-opacity"
+                :class="getStatusClass(domain.status)"
+                @click="openSuspendedInfo(domain)"
+              >
+                {{ domain.status }}
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </button>
+              <div v-else class="shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium" :class="getStatusClass(domain.status)">
+                {{ domain.status }}
+              </div>
             </div>
-          </h2>
 
-          <!-- Suspended Notice -->
-          <div v-if="domain.status === 'suspended'" class="alert alert-warning py-2 text-sm">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-            </svg>
-            <span>{{ $t('domains.suspendedNotice') }}</span>
-          </div>
+            <!-- Abuse Notice -->
+            <div v-if="domain.status === 'abuse'" class="flex items-start gap-1.5 text-xs text-error bg-error/10 rounded-lg px-3 py-2 mb-3">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+              </svg>
+              <span>{{ $t('domains.abuseNotice') }}</span>
+            </div>
 
-          <!-- Abuse Notice -->
-          <div v-if="domain.status === 'abuse'" class="alert alert-error py-2 text-sm">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-            </svg>
-            <span>{{ $t('domains.abuseNotice') }}</span>
-          </div>
+            <!-- Pending Deletion Notice -->
+            <div
+              v-if="domain.first_failed_at && getDaysUntilDeletion(domain.first_failed_at) !== null"
+              class="flex items-start gap-1.5 text-xs rounded-lg px-3 py-2 mb-3"
+              :class="getDaysUntilDeletion(domain.first_failed_at) <= 3 ? 'text-error bg-error/10' : 'text-warning bg-warning/10'"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <span v-if="getDaysUntilDeletion(domain.first_failed_at) <= 0">{{ $t('domains.pendingDeletionSoonNotice') }}</span>
+              <span v-else>{{ $t('domains.pendingDeletionNotice', { days: getDaysUntilDeletion(domain.first_failed_at) }) }}</span>
+            </div>
 
-          <!-- Pending Deletion Notice -->
-          <div
-            v-if="domain.first_failed_at && getDaysUntilDeletion(domain.first_failed_at) !== null"
-            class="alert py-2 text-sm"
-            :class="getDaysUntilDeletion(domain.first_failed_at) <= 3 ? 'alert-error' : 'alert-warning'"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-            <span v-if="getDaysUntilDeletion(domain.first_failed_at) <= 0">
-              {{ $t('domains.pendingDeletionSoonNotice') }}
-            </span>
-            <span v-else>
-              {{ $t('domains.pendingDeletionNotice', { days: getDaysUntilDeletion(domain.first_failed_at) }) }}
-            </span>
-          </div>
-
-          <div class="space-y-2 text-sm">
-            <p>
-              <span class="font-semibold">{{ $t('domains.registered') }}:</span>
-              {{ formatDate(domain.registered_at) }}
-            </p>
-            <p>
-              <span class="font-semibold">{{ $t('domains.expires') }}:</span>
-              {{ formatDate(domain.expires_at) }}
-              <span v-if="domain.status === 'active' && getDaysUntilExpiry(domain.expires_at) <= 30" class="text-warning ml-2">
-                ({{ getDaysUntilExpiry(domain.expires_at) }} {{ $t('domains.daysLeft') }})
-              </span>
-            </p>
-            
-            <!-- Health Status -->
-            <div v-if="domain.scan_summary" class="border-t pt-2 mt-2">
+            <!-- Meta info: registration & expiry -->
+            <dl class="space-y-1.5 text-xs mb-4">
               <div class="flex items-center justify-between gap-2">
-                <div 
-                  class="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity"
+                <dt class="text-base-content/50 shrink-0">{{ $t('domains.registered') }}</dt>
+                <dd class="font-medium tabular-nums text-right">{{ formatDate(domain.registered_at) }}</dd>
+              </div>
+              <div class="flex items-center justify-between gap-2">
+                <dt class="text-base-content/50 shrink-0">{{ $t('domains.expires') }}</dt>
+                <dd class="font-medium tabular-nums text-right flex items-center gap-1.5">
+                  {{ formatDate(domain.expires_at) }}
+                  <span v-if="domain.status === 'active' && getDaysUntilExpiry(domain.expires_at) <= 30" class="text-warning font-semibold">
+                    {{ getDaysUntilExpiry(domain.expires_at) }}d
+                  </span>
+                </dd>
+              </div>
+            </dl>
+
+            <!-- Status indicators row: health + DNS sync -->
+            <div class="flex items-center justify-between pt-3 border-t border-base-300">
+              <!-- Health Status -->
+              <div v-if="domain.scan_summary" class="flex items-center gap-1.5">
+                <span class="text-xs text-base-content/40">{{ $t('domains.healthStatus') }}</span>
+                <button
+                  class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium hover:opacity-80 transition-opacity"
+                  :class="getHealthBadgeClass(domain.scan_summary.overall_health)"
                   @click="viewHealthDetails(domain)"
                 >
-                  <span class="font-semibold text-sm">{{ $t('domains.healthStatus') }}:</span>
-                  <div class="px-3 py-1 rounded text-sm font-medium inline-flex items-center gap-1.5" :class="getHealthBadgeClass(domain.scan_summary.overall_health)">
-                    {{ domain.scan_summary.overall_health || 'unknown' }}
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                  </div>
-                </div>
+                  {{ domain.scan_summary.overall_health || 'unknown' }}
+                </button>
                 <button
-                  class="btn btn-xs btn-ghost"
+                  class="text-base-content/30 hover:text-base-content/70 transition-colors"
                   @click="viewScanDetails(domain)"
+                  :title="$t('domains.scanDetails')"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                   </svg>
-                  {{ $t('domains.scanDetails') }}
                 </button>
               </div>
-            </div>
-            <div v-else class="border-t pt-2 mt-2">
-              <p class="text-xs opacity-50">{{ $t('domains.noScanData') }}</p>
-            </div>
-            
-            <!-- DNS Synced Status -->
-            <div class="flex items-center gap-2 pt-2">
-              <span class="font-semibold text-sm">{{ $t('domains.dnsSynced') }}:</span>
-              <div class="px-3 py-1 rounded text-sm font-medium inline-flex items-center gap-1.5" :class="domain.dns_synced ? 'bg-green-100 text-green-800' : 'bg-orange-100 text-orange-800'">
-                <svg v-if="domain.dns_synced" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-                </svg>
-                <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                {{ domain.dns_synced ? $t('domains.yes') : $t('domains.no') }}
+              <div v-else class="text-xs text-base-content/30">{{ $t('domains.noScanData') }}</div>
+
+              <!-- DNS Synced indicator -->
+              <div class="flex items-center gap-1 text-xs">
+                <span class="text-base-content/40">DNS</span>
+                <span v-if="domain.dns_synced" class="inline-flex items-center gap-1 text-success font-medium">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                  </svg>
+                  {{ $t('domains.yes') }}
+                </span>
+                <span v-else class="inline-flex items-center gap-1 text-warning font-medium">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  {{ $t('domains.no') }}
+                </span>
               </div>
             </div>
 
-          </div>
+          </div><!-- end opacity wrapper -->
 
-          <div class="card-actions justify-end mt-4 flex-wrap gap-2">
+          <div class="card-actions justify-end mt-4 pt-3 border-t border-base-300 flex-wrap gap-2">
             <button
               v-if="domain.status === 'active'"
               class="btn btn-sm"
@@ -999,6 +1007,24 @@
       </form>
     </dialog>
 
+    <!-- Suspended Info Modal -->
+    <dialog :class="{ 'modal': true, 'modal-open': showSuspendedInfoModal }">
+      <div class="modal-box max-w-sm">
+        <h3 class="font-bold text-lg text-warning mb-3">{{ $t('domains.suspendedTitle') }}</h3>
+        <p class="text-sm mb-2">{{ $t('domains.suspendedNotice') }}</p>
+        <div v-if="suspendedInfoDomain?.suspend_reason" class="bg-base-200 rounded-lg px-3 py-2 text-sm mt-3">
+          <span class="font-semibold">{{ $t('domains.suspendReasonLabel') }}:</span>
+          <span class="ml-1">{{ suspendedInfoDomain.suspend_reason }}</span>
+        </div>
+        <div class="modal-action">
+          <button class="btn btn-sm" @click="showSuspendedInfoModal = false">{{ $t('common.close') }}</button>
+        </div>
+      </div>
+      <form method="dialog" class="modal-backdrop">
+        <button type="button" @click="showSuspendedInfoModal = false">close</button>
+      </form>
+    </dialog>
+
     <!-- Delete Domain Confirm Modal -->
     <dialog :class="{ 'modal': true, 'modal-open': showDeleteModal }">
       <div class="modal-box">
@@ -1066,6 +1092,8 @@ const showHealthDetailsModal = ref(false)
 const showDeleteModal = ref(false)
 const deleteTargetDomain = ref(null)
 const deleteConfirmInput = ref('')
+const showSuspendedInfoModal = ref(false)
+const suspendedInfoDomain = ref(null)
 const selectedDomain = ref(null)
 
 // NS modification
@@ -1592,6 +1620,12 @@ const closeTransferModal = () => {
   showTransferModal.value = false
   selectedDomain.value = null
   transferTarget.value = ''
+}
+
+// Suspended Info
+const openSuspendedInfo = (domain) => {
+  suspendedInfoDomain.value = domain
+  showSuspendedInfoModal.value = true
 }
 
 // Delete Domain

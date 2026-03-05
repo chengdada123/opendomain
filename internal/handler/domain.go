@@ -541,6 +541,9 @@ func (h *DomainHandler) ListMyDomains(c *gin.Context) {
 			"nameservers":             resp.Nameservers,
 			"use_default_nameservers": resp.UseDefaultNameservers,
 			"dns_synced":              resp.DNSSynced,
+			"first_failed_at":         resp.FirstFailedAt,
+			"suspended_at":            resp.SuspendedAt,
+			"suspend_reason":          resp.SuspendReason,
 			"root_domain":             resp.RootDomain,
 		}
 
