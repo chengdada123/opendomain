@@ -1886,33 +1886,61 @@ func (h *DomainHandler) AdminCreateDomainForUser(c *gin.Context) {
 
 	fullDomain := fmt.Sprintf("%s.%s", req.Subdomain, rootDomain.Domain)
 
-	// 检查域名是否已存在（含软删除记录，唯一约束仍然生效）
-	var existingDomain models.Domain
-	if err := h.db.Unscoped().Where("full_domain = ?", fullDomain).First(&existingDomain).Error; err == nil {
+	// 检查域名是否已存在（非软删除）
+	var activeCheck models.Domain
+	if err := h.db.Where("full_domain = ?", fullDomain).First(&activeCheck).Error; err == nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "Domain already registered"})
 		return
 	}
+
+	// 检查是否存在软删除记录（唯一约束仍生效，需要先恢复再更新）
+	var deletedDomain models.Domain
+	hasSoftDeleted := h.db.Unscoped().Where("full_domain = ? AND deleted_at IS NOT NULL", fullDomain).First(&deletedDomain).Error == nil
 
 	// 事务创建域名
 	var domain models.Domain
 	err := h.db.Transaction(func(tx *gorm.DB) error {
 		now := timeutil.Now()
-		domain = models.Domain{
-			UserID:                req.UserID,
-			RootDomainID:          req.RootDomainID,
-			Subdomain:             req.Subdomain,
-			FullDomain:            fullDomain,
-			Status:                "active",
-			RegisteredAt:          now,
-			ExpiresAt:             now.AddDate(years, 0, 0),
-			AutoRenew:             false,
-			Nameservers:           rootDomain.Nameservers,
-			UseDefaultNameservers: rootDomain.UseDefaultNameservers,
-			DNSSynced:             false,
-		}
-
-		if err := tx.Create(&domain).Error; err != nil {
-			return err
+		if hasSoftDeleted {
+			// 恢复软删除记录并更新字段
+			updates := map[string]interface{}{
+				"user_id":                 req.UserID,
+				"root_domain_id":          req.RootDomainID,
+				"subdomain":               req.Subdomain,
+				"status":                  "active",
+				"registered_at":           now,
+				"expires_at":              now.AddDate(years, 0, 0),
+				"auto_renew":              false,
+				"nameservers":             rootDomain.Nameservers,
+				"use_default_nameservers": rootDomain.UseDefaultNameservers,
+				"dns_synced":              false,
+				"dns_sync_error":          nil,
+				"first_failed_at":         nil,
+				"suspended_at":            nil,
+				"suspend_reason":          nil,
+				"deleted_at":              nil,
+			}
+			if err := tx.Unscoped().Model(&deletedDomain).Updates(updates).Error; err != nil {
+				return err
+			}
+			domain = deletedDomain
+		} else {
+			domain = models.Domain{
+				UserID:                req.UserID,
+				RootDomainID:          req.RootDomainID,
+				Subdomain:             req.Subdomain,
+				FullDomain:            fullDomain,
+				Status:                "active",
+				RegisteredAt:          now,
+				ExpiresAt:             now.AddDate(years, 0, 0),
+				AutoRenew:             false,
+				Nameservers:           rootDomain.Nameservers,
+				UseDefaultNameservers: rootDomain.UseDefaultNameservers,
+				DNSSynced:             false,
+			}
+			if err := tx.Create(&domain).Error; err != nil {
+				return err
+			}
 		}
 
 		// 更新根域名注册计数
@@ -1925,11 +1953,7 @@ func (h *DomainHandler) AdminCreateDomainForUser(c *gin.Context) {
 	})
 
 	if err != nil {
-		if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "unique constraint") {
-			c.JSON(http.StatusConflict, gin.H{"error": "Domain already registered"})
-		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create domain"})
-		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create domain"})
 		return
 	}
 
