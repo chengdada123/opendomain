@@ -321,15 +321,48 @@
       <div class="modal-box">
         <h3 class="font-bold text-lg mb-4">{{ $t('adminDomains.addDomainTitle') }}</h3>
         <div class="space-y-4">
+          <!-- 用户搜索 -->
           <div class="form-control">
-            <label class="label"><span class="label-text">{{ $t('adminDomains.userId') }}</span></label>
-            <input
-              v-model.number="createForm.user_id"
-              type="number"
-              min="1"
-              :placeholder="$t('adminDomains.userIdPlaceholder')"
-              class="input input-bordered w-full"
-            />
+            <label class="label"><span class="label-text">{{ $t('adminDomains.userSearch') }}</span></label>
+            <div class="relative">
+              <input
+                v-model="userSearchQuery"
+                type="text"
+                :placeholder="$t('adminDomains.userSearchPlaceholder')"
+                class="input input-bordered w-full"
+                @input="debouncedUserSearch"
+                autocomplete="off"
+              />
+              <span v-if="userSearchLoading" class="absolute right-3 top-3">
+                <span class="loading loading-spinner loading-sm"></span>
+              </span>
+              <!-- 下拉候选列表 -->
+              <div
+                v-if="userSuggestions.length > 0"
+                class="absolute z-50 w-full mt-1 bg-base-100 border border-base-300 rounded-lg shadow-lg max-h-48 overflow-y-auto"
+              >
+                <div
+                  v-for="u in userSuggestions"
+                  :key="u.id"
+                  class="flex items-center gap-3 px-4 py-2 cursor-pointer hover:bg-base-200"
+                  @mousedown.prevent="selectUser(u)"
+                >
+                  <div>
+                    <div class="font-semibold text-sm">{{ u.username }}</div>
+                    <div class="text-xs opacity-60">{{ u.email }} · ID: {{ u.id }}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <!-- 已选用户展示 -->
+            <div v-if="createForm.selected_user" class="mt-2 flex items-center gap-2 bg-base-200 rounded-lg px-3 py-2">
+              <div class="flex-1 text-sm">
+                <span class="font-semibold">{{ createForm.selected_user.username }}</span>
+                <span class="opacity-60 ml-2">{{ createForm.selected_user.email }}</span>
+                <span class="opacity-40 ml-2">ID: {{ createForm.selected_user.id }}</span>
+              </div>
+              <button class="btn btn-xs btn-ghost" @click="clearSelectedUser">✕</button>
+            </div>
           </div>
           <div class="form-control">
             <label class="label"><span class="label-text">{{ $t('adminDomains.subdomainLabel') }}</span></label>
@@ -365,7 +398,7 @@
           <button
             @click="handleCreateDomain"
             class="btn btn-success"
-            :disabled="creating || !createForm.user_id || !createForm.subdomain || !createForm.root_domain_id"
+            :disabled="creating || !createForm.selected_user || !createForm.subdomain || !createForm.root_domain_id"
           >
             <span v-if="creating" class="loading loading-spinner loading-sm"></span>
             <span v-else>{{ $t('adminDomains.addDomain') }}</span>
@@ -436,12 +469,16 @@ const suspending = ref(false)
 const creating = ref(false)
 const syncing = ref(false) // FOSSBilling同步状态
 const rootDomains = ref([])
+const userSearchQuery = ref('')
+const userSuggestions = ref([])
+const userSearchLoading = ref(false)
 const createForm = ref({
-  user_id: '',
+  selected_user: null,
   subdomain: '',
   root_domain_id: '',
   years: 1
 })
+let userSearchTimeout = null
 const stats = ref({
   total: 0,
   active: 0,
@@ -772,20 +809,52 @@ const fetchRootDomains = async () => {
 }
 
 const openCreateModal = () => {
-  createForm.value = { user_id: '', subdomain: '', root_domain_id: '', years: 1 }
+  createForm.value = { selected_user: null, subdomain: '', root_domain_id: '', years: 1 }
+  userSearchQuery.value = ''
+  userSuggestions.value = []
   if (rootDomains.value.length === 0) fetchRootDomains()
   showCreateModal.value = true
 }
 
 const closeCreateModal = () => {
   showCreateModal.value = false
+  userSuggestions.value = []
+}
+
+const debouncedUserSearch = () => {
+  if (userSearchTimeout) clearTimeout(userSearchTimeout)
+  userSuggestions.value = []
+  if (!userSearchQuery.value.trim()) return
+  userSearchTimeout = setTimeout(async () => {
+    userSearchLoading.value = true
+    try {
+      const res = await axios.get('/api/admin/users', {
+        params: { search: userSearchQuery.value.trim(), page: 1, page_size: 8 }
+      })
+      userSuggestions.value = res.data.users || []
+    } catch {
+      userSuggestions.value = []
+    } finally {
+      userSearchLoading.value = false
+    }
+  }, 300)
+}
+
+const selectUser = (user) => {
+  createForm.value.selected_user = user
+  userSearchQuery.value = ''
+  userSuggestions.value = []
+}
+
+const clearSelectedUser = () => {
+  createForm.value.selected_user = null
 }
 
 const handleCreateDomain = async () => {
   creating.value = true
   try {
     await axios.post('/api/admin/domains', {
-      user_id: createForm.value.user_id,
+      user_id: createForm.value.selected_user.id,
       subdomain: createForm.value.subdomain.trim(),
       root_domain_id: createForm.value.root_domain_id,
       years: createForm.value.years || 1

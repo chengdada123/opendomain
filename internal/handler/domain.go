@@ -1884,11 +1884,6 @@ func (h *DomainHandler) AdminCreateDomainForUser(c *gin.Context) {
 		return
 	}
 
-	if isBlacklisted(req.Subdomain) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "This subdomain is reserved"})
-		return
-	}
-
 	fullDomain := fmt.Sprintf("%s.%s", req.Subdomain, rootDomain.Domain)
 
 	// 检查域名是否已存在（含软删除记录，唯一约束仍然生效）
