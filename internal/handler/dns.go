@@ -172,12 +172,6 @@ func (h *DNSHandler) CreateRecord(c *gin.Context) {
 		return
 	}
 
-	// 禁止在 zone apex (@) 使用 CNAME，应使用 ALIAS 代替
-	if req.Type == "CNAME" && (req.Name == "@" || req.Name == "") {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "CNAME records cannot be used at the zone apex (@). Use an ALIAS record instead for CNAME flattening at the root."})
-		return
-	}
-
 	// CNAME/ALIAS 冲突检查：CNAME/ALIAS 不能与同名的其他记录共存（仅检查活跃记录）
 	var conflictCount int64
 	if req.Type == "CNAME" || req.Type == "ALIAS" {
@@ -434,6 +428,11 @@ func isValidIPv6(ip string) bool {
 // buildRecordFQDN 构建 PowerDNS 所需的完整记录名
 // Name="@" FullDomain="sub.example.com" → "sub.example.com"
 // Name="www" FullDomain="sub.example.com" → "www.sub.example.com"
+// isApexRecord 判断记录名是否为 zone apex
+func isApexRecord(name string) bool {
+	return name == "@" || name == ""
+}
+
 func buildRecordFQDN(name, fullDomain string) string {
 	if name == "@" || name == "" {
 		return fullDomain
@@ -454,15 +453,30 @@ func (h *DNSHandler) syncRecordSetToPowerDNS(record *models.DNSRecord, domain *m
 	h.db.Where("domain_id = ? AND name = ? AND type = ? AND is_active = ?",
 		record.DomainID, record.Name, record.Type, true).Find(&allRecords)
 
+	// CNAME Flattening：根域名 CNAME 转为 LUA 记录推送到 PowerDNS
+	pdnsType := record.Type
 	entries := make([]powerdns.RecordEntry, 0, len(allRecords))
-	for _, r := range allRecords {
-		entries = append(entries, powerdns.RecordEntry{
-			Content:  normalizePowerDNSContent(r.Type, r.Content),
-			Priority: r.Priority,
-		})
+	if record.Type == "CNAME" && isApexRecord(record.Name) {
+		pdnsType = "LUA"
+		for _, r := range allRecords {
+			target := r.Content
+			if !strings.HasSuffix(target, ".") {
+				target += "."
+			}
+			entries = append(entries, powerdns.RecordEntry{
+				Content: fmt.Sprintf("CNAME \";return '%s'\"", target),
+			})
+		}
+	} else {
+		for _, r := range allRecords {
+			entries = append(entries, powerdns.RecordEntry{
+				Content:  normalizePowerDNSContent(r.Type, r.Content),
+				Priority: r.Priority,
+			})
+		}
 	}
 
-	err := h.pdns.SetRecords(zoneDomain, recordFQDN, record.Type, entries, record.TTL)
+	err := h.pdns.SetRecords(zoneDomain, recordFQDN, pdnsType, entries, record.TTL)
 	if err != nil {
 		// 如果 zone 不存在，尝试创建
 		if strings.Contains(err.Error(), "not found") ||
@@ -540,6 +554,12 @@ func (h *DNSHandler) deleteRecordFromPowerDNS(record *models.DNSRecord, domain *
 	zoneDomain := domain.FullDomain
 	recordFQDN := buildRecordFQDN(record.Name, domain.FullDomain)
 
+	// CNAME Flattening：根域名 CNAME 在 PowerDNS 中存储为 LUA 类型
+	pdnsType := record.Type
+	if record.Type == "CNAME" && isApexRecord(record.Name) {
+		pdnsType = "LUA"
+	}
+
 	// 查询同 name+type 的剩余活跃记录
 	var remaining []models.DNSRecord
 	h.db.Where("domain_id = ? AND name = ? AND type = ? AND is_active = ?",
@@ -547,21 +567,33 @@ func (h *DNSHandler) deleteRecordFromPowerDNS(record *models.DNSRecord, domain *
 
 	if len(remaining) == 0 {
 		// 没有剩余记录，删除整个 RRset
-		if err := h.pdns.DeleteRRset(zoneDomain, recordFQDN, record.Type); err != nil {
+		if err := h.pdns.DeleteRRset(zoneDomain, recordFQDN, pdnsType); err != nil {
 			fmt.Printf("Warning: Failed to delete RRset from PowerDNS: %v\n", err)
 		}
 	} else {
 		// 还有剩余记录，用剩余记录替换
 		entries := make([]powerdns.RecordEntry, 0, len(remaining))
-		for _, r := range remaining {
-			entries = append(entries, powerdns.RecordEntry{
-				Content:  normalizePowerDNSContent(r.Type, r.Content),
-				Priority: r.Priority,
-			})
+		if pdnsType == "LUA" {
+			for _, r := range remaining {
+				target := r.Content
+				if !strings.HasSuffix(target, ".") {
+					target += "."
+				}
+				entries = append(entries, powerdns.RecordEntry{
+					Content: fmt.Sprintf("CNAME \";return '%s'\"", target),
+				})
+			}
+		} else {
+			for _, r := range remaining {
+				entries = append(entries, powerdns.RecordEntry{
+					Content:  normalizePowerDNSContent(r.Type, r.Content),
+					Priority: r.Priority,
+				})
+			}
 		}
 
 		// 尝试更新记录，如果 zone 不存在则创建
-		err := h.pdns.SetRecords(zoneDomain, recordFQDN, record.Type, entries, remaining[0].TTL)
+		err := h.pdns.SetRecords(zoneDomain, recordFQDN, pdnsType, entries, remaining[0].TTL)
 		if err != nil {
 			// 检测 zone 是否不存在
 			if strings.Contains(err.Error(), "not found") ||
@@ -701,6 +733,25 @@ func (h *DNSHandler) SyncFromPowerDNS(c *gin.Context) {
 		// 解析记录名称（将 FQDN 转换为本地名称）
 		recordName := extractRecordName(rrset.Name, domain.FullDomain)
 
+		// CNAME Flattening 反向映射：LUA CNAME 记录还原为 CNAME 类型
+		rrsetType := rrset.Type
+		var luaCNAMEContent string
+		if rrset.Type == "LUA" && isApexRecord(recordName) {
+			for _, r := range rrset.Records {
+				if strings.HasPrefix(r.Content, "CNAME ") {
+					// 格式: CNAME ";return 'target.'"
+					// 提取单引号内的目标
+					s := strings.TrimPrefix(r.Content, "CNAME ")
+					start := strings.Index(s, "'")
+					end := strings.LastIndex(s, "'")
+					if start >= 0 && end > start {
+						luaCNAMEContent = strings.TrimSuffix(s[start+1:end], ".")
+						rrsetType = "CNAME"
+					}
+				}
+			}
+		}
+
 		// 处理每条记录
 		for _, record := range rrset.Records {
 			if record.Disabled {
@@ -708,12 +759,20 @@ func (h *DNSHandler) SyncFromPowerDNS(c *gin.Context) {
 			}
 
 			// 解析记录内容和优先级
-			content, priority := parseRecordContent(rrset.Type, record.Content)
+			// 对于 LUA CNAME 记录，使用反向映射后的内容
+			var content string
+			var priority *int
+			if luaCNAMEContent != "" {
+				content = luaCNAMEContent
+				// LUA CNAME 不需要再处理 priority
+			} else {
+				content, priority = parseRecordContent(rrset.Type, record.Content)
+			}
 
 			// 检查是否已存在相同记录
 			var existingRecord models.DNSRecord
 			err := h.db.Where("domain_id = ? AND name = ? AND type = ? AND content = ?",
-				domain.ID, recordName, rrset.Type, content).First(&existingRecord).Error
+				domain.ID, recordName, rrsetType, content).First(&existingRecord).Error
 
 			now := timeutil.Now()
 			if err == gorm.ErrRecordNotFound {
@@ -721,7 +780,7 @@ func (h *DNSHandler) SyncFromPowerDNS(c *gin.Context) {
 				newRecord := &models.DNSRecord{
 					DomainID:         domain.ID,
 					Name:             recordName,
-					Type:             rrset.Type,
+					Type:             rrsetType,
 					Content:          content,
 					TTL:              rrset.TTL,
 					Priority:         priority,

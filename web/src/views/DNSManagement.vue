@@ -239,6 +239,10 @@
                 <span class="font-semibold">{{ $t('dnsManagement.aliasHintTitle') }}</span>
                 {{ $t('dnsManagement.aliasHint') }}
               </div>
+              <div v-if="form.type === 'CNAME' && (form.name === '@' || form.name === '')" class="mt-2 p-3 bg-success/10 rounded-lg text-sm text-success">
+                <span class="font-semibold">{{ $t('dnsManagement.cnameFlatteningTitle') }}</span>
+                {{ $t('dnsManagement.cnameFlatteningHint') }}
+              </div>
             </div>
           </div>
 
