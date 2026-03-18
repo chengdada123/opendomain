@@ -1038,7 +1038,18 @@ export default {
     skipped: 'Skipped',
     existing: 'Already Exists',
     errors: 'Errors',
-    syncFailed: 'Sync failed'
+    syncFailed: 'Sync failed',
+    addDomain: 'Add Domain',
+    addDomainTitle: 'Add Domain for User',
+    userId: 'User ID',
+    userIdPlaceholder: 'Enter user ID',
+    subdomainLabel: 'Subdomain',
+    subdomainPlaceholder: 'Enter subdomain',
+    rootDomainLabel: 'Root Domain',
+    rootDomainSelect: 'Select root domain',
+    yearsLabel: 'Years',
+    createSuccess: 'Domain created successfully',
+    createFailed: 'Failed to create domain'
   },
   adminPendingDomains: {
     title: 'Pending Domains Management',

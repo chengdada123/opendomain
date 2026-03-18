@@ -1038,7 +1038,18 @@ export default {
     skipped: '已跳过',
     existing: '已存在',
     errors: '错误',
-    syncFailed: '同步失败'
+    syncFailed: '同步失败',
+    addDomain: '新增域名',
+    addDomainTitle: '为用户新增域名',
+    userId: '用户ID',
+    userIdPlaceholder: '输入用户ID',
+    subdomainLabel: '子域名',
+    subdomainPlaceholder: '输入子域名',
+    rootDomainLabel: '根域名',
+    rootDomainSelect: '选择根域名',
+    yearsLabel: '注册年限',
+    createSuccess: '域名创建成功',
+    createFailed: '域名创建失败'
   },
   adminPendingDomains: {
     title: '待激活域名管理',

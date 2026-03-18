@@ -12,6 +12,12 @@
           <span v-if="syncing" class="loading loading-spinner loading-sm"></span>
           {{ syncing ? $t('adminDomains.syncing') : $t('adminDomains.syncFOSSBilling') }}
         </button>
+        <button @click="openCreateModal" class="btn btn-success btn-sm">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+          </svg>
+          {{ $t('adminDomains.addDomain') }}
+        </button>
         <div class="text-sm opacity-70">{{ $t('adminDomains.totalCount', { count: pagination.total }) }}</div>
       </div>
     </div>
@@ -310,6 +316,65 @@
       </form>
     </dialog>
 
+    <!-- Create Domain Modal -->
+    <dialog class="modal" :class="{ 'modal-open': showCreateModal }">
+      <div class="modal-box">
+        <h3 class="font-bold text-lg mb-4">{{ $t('adminDomains.addDomainTitle') }}</h3>
+        <div class="space-y-4">
+          <div class="form-control">
+            <label class="label"><span class="label-text">{{ $t('adminDomains.userId') }}</span></label>
+            <input
+              v-model.number="createForm.user_id"
+              type="number"
+              min="1"
+              :placeholder="$t('adminDomains.userIdPlaceholder')"
+              class="input input-bordered w-full"
+            />
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text">{{ $t('adminDomains.subdomainLabel') }}</span></label>
+            <input
+              v-model="createForm.subdomain"
+              type="text"
+              :placeholder="$t('adminDomains.subdomainPlaceholder')"
+              class="input input-bordered w-full font-mono"
+            />
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text">{{ $t('adminDomains.rootDomainLabel') }}</span></label>
+            <select v-model="createForm.root_domain_id" class="select select-bordered w-full">
+              <option value="" disabled>{{ $t('adminDomains.rootDomainSelect') }}</option>
+              <option v-for="rd in rootDomains" :key="rd.id" :value="rd.id">
+                .{{ rd.domain }}
+              </option>
+            </select>
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text">{{ $t('adminDomains.yearsLabel') }}</span></label>
+            <input
+              v-model.number="createForm.years"
+              type="number"
+              min="1"
+              max="10"
+              class="input input-bordered w-full"
+            />
+          </div>
+        </div>
+        <div class="modal-action">
+          <button @click="closeCreateModal" class="btn">{{ $t('common.cancel') }}</button>
+          <button
+            @click="handleCreateDomain"
+            class="btn btn-success"
+            :disabled="creating || !createForm.user_id || !createForm.subdomain || !createForm.root_domain_id"
+          >
+            <span v-if="creating" class="loading loading-spinner loading-sm"></span>
+            <span v-else>{{ $t('adminDomains.addDomain') }}</span>
+          </button>
+        </div>
+      </div>
+      <form method="dialog" class="modal-backdrop" @click="closeCreateModal"><button>close</button></form>
+    </dialog>
+
     <!-- Suspend Reason Modal -->
     <dialog class="modal" :class="{ 'modal-open': showSuspendModal }">
       <div class="modal-box">
@@ -361,13 +426,22 @@ const loading = ref(true)
 const showDetailsModal = ref(false)
 const showDeleteModal = ref(false)
 const showSuspendModal = ref(false)
+const showCreateModal = ref(false)
 const selectedDomain = ref(null)
 const domainToDelete = ref(null)
 const domainToSuspend = ref(null)
 const suspendReason = ref('')
 const deleting = ref(false)
 const suspending = ref(false)
+const creating = ref(false)
 const syncing = ref(false) // FOSSBilling同步状态
+const rootDomains = ref([])
+const createForm = ref({
+  user_id: '',
+  subdomain: '',
+  root_domain_id: '',
+  years: 1
+})
 const stats = ref({
   total: 0,
   active: 0,
@@ -685,6 +759,45 @@ const formatNameservers = (nameservers) => {
     return Array.isArray(ns) ? ns.join(', ') : nameservers
   } catch {
     return nameservers
+  }
+}
+
+const fetchRootDomains = async () => {
+  try {
+    const response = await axios.get('/api/admin/root-domains')
+    rootDomains.value = (response.data.root_domains || []).filter(rd => rd.is_active)
+  } catch (error) {
+    console.error('Failed to fetch root domains:', error)
+  }
+}
+
+const openCreateModal = () => {
+  createForm.value = { user_id: '', subdomain: '', root_domain_id: '', years: 1 }
+  if (rootDomains.value.length === 0) fetchRootDomains()
+  showCreateModal.value = true
+}
+
+const closeCreateModal = () => {
+  showCreateModal.value = false
+}
+
+const handleCreateDomain = async () => {
+  creating.value = true
+  try {
+    await axios.post('/api/admin/domains', {
+      user_id: createForm.value.user_id,
+      subdomain: createForm.value.subdomain.trim(),
+      root_domain_id: createForm.value.root_domain_id,
+      years: createForm.value.years || 1
+    })
+    toast.success(t('adminDomains.createSuccess'))
+    closeCreateModal()
+    await fetchStats()
+    await fetchDomains(searchQuery.value)
+  } catch (error) {
+    toast.error(error.response?.data?.error || t('adminDomains.createFailed'))
+  } finally {
+    creating.value = false
   }
 }
 
