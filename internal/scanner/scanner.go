@@ -284,13 +284,13 @@ func (s *Scanner) deleteAbuseRecordsForDomain(domain *models.Domain) error {
 // ScanAllDomains 扫描所有活跃域名（分批处理，遵守 API 速率限制）
 func (s *Scanner) ScanAllDomains(ctx context.Context) error {
 	var domains []models.Domain
-	if err := s.db.Where("status = ?", "active").Find(&domains).Error; err != nil {
+	if err := s.db.Where("status IN ?", []string{"active", "suspended"}).Find(&domains).Error; err != nil {
 		return fmt.Errorf("failed to fetch domains: %w", err)
 	}
 
 	totalDomains := len(domains)
 	if totalDomains == 0 {
-		fmt.Println("[INFO] No active domains to scan")
+		fmt.Println("[INFO] No active/suspended domains to scan")
 		return nil
 	}
 

@@ -172,6 +172,9 @@ func (h *DNSHandler) CreateRecord(c *gin.Context) {
 		return
 	}
 
+	// 规范化用户输入（去除 CNAME/ALIAS 首尾引号等）
+	req.Content = normalizeUserContent(req.Type, req.Content)
+
 	// CNAME/ALIAS 冲突检查：CNAME/ALIAS 不能与同名的其他记录共存（仅检查活跃记录）
 	var conflictCount int64
 	if req.Type == "CNAME" || req.Type == "ALIAS" {
@@ -273,7 +276,7 @@ func (h *DNSHandler) UpdateRecord(c *gin.Context) {
 		record.Type = *req.Type
 	}
 	if req.Content != nil {
-		record.Content = *req.Content
+		record.Content = normalizeUserContent(record.Type, *req.Content)
 	}
 	if req.TTL != nil {
 		record.TTL = *req.TTL
@@ -360,16 +363,63 @@ func (h *DNSHandler) DeleteRecord(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "DNS record deleted successfully"})
 }
 
+// normalizeUserContent 规范化用户输入的 DNS 记录内容，存入 DB 前清理
+// CNAME/ALIAS: 去除用户可能误加的首尾引号和尾点
+func normalizeUserContent(recordType, content string) string {
+	switch recordType {
+	case "CNAME", "ALIAS", "NS":
+		// 去除首尾的单引号、双引号、反引号
+		content = strings.Trim(content, "'\"` ")
+		// 去除尾点（DB 存储不带尾点，推送时再加）
+		content = strings.TrimSuffix(content, ".")
+	}
+	return content
+}
+
 // normalizePowerDNSContent 确保需要 FQDN 的记录类型在内容末尾有尾点
 // PowerDNS 要求 ALIAS、CNAME、NS、MX 等的目标为绝对域名（以 . 结尾）
+// PowerDNS 要求 TXT 内容用双引号包裹；CAA 的 value 段也需要引号
 func normalizePowerDNSContent(recordType, content string) string {
 	switch recordType {
 	case "ALIAS", "CNAME", "NS", "MX":
 		if content != "" && !strings.HasSuffix(content, ".") {
 			return content + "."
 		}
+	case "TXT", "SPF":
+		return ensureTXTQuoted(content)
+	case "CAA":
+		return ensureCAAQuoted(content)
 	}
 	return content
+}
+
+// ensureTXTQuoted 确保 TXT/SPF 内容被双引号包裹
+// 用户输入: v=spf1 include:example.com ~all
+// 推送给 PowerDNS: "v=spf1 include:example.com ~all"
+func ensureTXTQuoted(content string) string {
+	if strings.HasPrefix(content, "\"") && strings.HasSuffix(content, "\"") {
+		return content // 已经有引号，不重复处理
+	}
+	// 转义内部双引号再包裹
+	content = strings.ReplaceAll(content, "\\\"", "\"")
+	content = strings.ReplaceAll(content, "\"", "\\\"")
+	return "\"" + content + "\""
+}
+
+// ensureCAAQuoted 确保 CAA value 段有引号
+// 用户输入: 0 issue letsencrypt.org
+// 推送给 PowerDNS: 0 issue "letsencrypt.org"
+func ensureCAAQuoted(content string) string {
+	parts := strings.Fields(content)
+	if len(parts) < 3 {
+		return content
+	}
+	value := strings.Join(parts[2:], " ")
+	if strings.HasPrefix(value, "\"") {
+		return content // 已经有引号
+	}
+	value = strings.ReplaceAll(value, "\"", "\\\"")
+	return parts[0] + " " + parts[1] + " \"" + value + "\""
 }
 
 // validateDNSRecord 验证 DNS 记录内容
@@ -459,10 +509,10 @@ func (h *DNSHandler) syncRecordSetToPowerDNS(record *models.DNSRecord, domain *m
 	if record.Type == "CNAME" && isApexRecord(record.Name) {
 		pdnsType = "LUA"
 		for _, r := range allRecords {
-			target := r.Content
-			if !strings.HasSuffix(target, ".") {
-				target += "."
-			}
+			// 去掉用户可能误加的引号，确保 Lua 语法正确
+			target := strings.Trim(r.Content, "'\"`")
+			target = strings.TrimSuffix(target, ".")
+			target += "."
 			entries = append(entries, powerdns.RecordEntry{
 				Content: fmt.Sprintf("CNAME \";return '%s'\"", target),
 			})
@@ -575,10 +625,9 @@ func (h *DNSHandler) deleteRecordFromPowerDNS(record *models.DNSRecord, domain *
 		entries := make([]powerdns.RecordEntry, 0, len(remaining))
 		if pdnsType == "LUA" {
 			for _, r := range remaining {
-				target := r.Content
-				if !strings.HasSuffix(target, ".") {
-					target += "."
-				}
+				target := strings.Trim(r.Content, "'\"`")
+				target = strings.TrimSuffix(target, ".")
+				target += "."
 				entries = append(entries, powerdns.RecordEntry{
 					Content: fmt.Sprintf("CNAME \";return '%s'\"", target),
 				})
@@ -844,6 +893,7 @@ func extractRecordName(fqdn, fullDomain string) string {
 }
 
 // parseRecordContent 解析记录内容，提取优先级（如果有）
+// 从 PowerDNS 读取时去除 TXT/CAA 的引号，还原为用户友好格式
 func parseRecordContent(recordType, content string) (string, *int) {
 	content = strings.TrimSuffix(content, ".")
 
@@ -854,6 +904,26 @@ func parseRecordContent(recordType, content string) (string, *int) {
 			if priority, err := strconv.Atoi(parts[0]); err == nil {
 				return strings.TrimSuffix(parts[1], "."), &priority
 			}
+		}
+	}
+
+	// TXT/SPF: 去除 PowerDNS 的引号，支持多段 "part1" "part2" -> "part1 part2"
+	if recordType == "TXT" || recordType == "SPF" {
+		// 合并多段引用: "part1" "part2" -> part1 part2
+		content = strings.ReplaceAll(content, "\" \"", " ")
+		content = strings.Trim(content, "\"")
+		content = strings.ReplaceAll(content, "\\\"", "\"")
+	}
+
+	// CAA: 去除 value 段的引号
+	// PowerDNS 返回: 0 issue "letsencrypt.org" -> 存储: 0 issue letsencrypt.org
+	if recordType == "CAA" {
+		parts := strings.Fields(content)
+		if len(parts) >= 3 {
+			value := strings.Join(parts[2:], " ")
+			value = strings.Trim(value, "\"")
+			value = strings.ReplaceAll(value, "\\\"", "\"")
+			content = parts[0] + " " + parts[1] + " " + value
 		}
 	}
 
