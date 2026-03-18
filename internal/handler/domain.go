@@ -1845,6 +1845,113 @@ func (h *DomainHandler) AdminDeleteDomain(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Domain deleted successfully"})
 }
 
+// AdminCreateDomainForUser 管理员为指定用户新增域名（绕过配额和付费限制）
+func (h *DomainHandler) AdminCreateDomainForUser(c *gin.Context) {
+	var req models.AdminCreateDomainRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 默认注册年限为 1 年
+	years := req.Years
+	if years <= 0 {
+		years = 1
+	}
+
+	// 验证目标用户存在
+	var user models.User
+	if err := h.db.First(&user, req.UserID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	// 验证根域名存在且启用
+	var rootDomain models.RootDomain
+	if err := h.db.First(&rootDomain, req.RootDomainID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Root domain not found"})
+		return
+	}
+
+	if !rootDomain.IsActive {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Root domain is not active"})
+		return
+	}
+
+	// 验证子域名格式
+	if !isValidSubdomain(req.Subdomain) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid subdomain format"})
+		return
+	}
+
+	if isBlacklisted(req.Subdomain) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "This subdomain is reserved"})
+		return
+	}
+
+	fullDomain := fmt.Sprintf("%s.%s", req.Subdomain, rootDomain.Domain)
+
+	// 检查域名是否已存在（含软删除记录，唯一约束仍然生效）
+	var existingDomain models.Domain
+	if err := h.db.Unscoped().Where("full_domain = ?", fullDomain).First(&existingDomain).Error; err == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "Domain already registered"})
+		return
+	}
+
+	// 事务创建域名
+	var domain models.Domain
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		now := timeutil.Now()
+		domain = models.Domain{
+			UserID:                req.UserID,
+			RootDomainID:          req.RootDomainID,
+			Subdomain:             req.Subdomain,
+			FullDomain:            fullDomain,
+			Status:                "active",
+			RegisteredAt:          now,
+			ExpiresAt:             now.AddDate(years, 0, 0),
+			AutoRenew:             false,
+			Nameservers:           rootDomain.Nameservers,
+			UseDefaultNameservers: rootDomain.UseDefaultNameservers,
+			DNSSynced:             false,
+		}
+
+		if err := tx.Create(&domain).Error; err != nil {
+			return err
+		}
+
+		// 更新根域名注册计数
+		if err := tx.Model(&rootDomain).
+			UpdateColumn("registration_count", gorm.Expr("registration_count + ?", 1)).Error; err != nil {
+			return err
+		}
+
+		return tx.Preload("RootDomain").First(&domain, domain.ID).Error
+	})
+
+	if err != nil {
+		if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "unique constraint") {
+			c.JSON(http.StatusConflict, gin.H{"error": "Domain already registered"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create domain"})
+		}
+		return
+	}
+
+	// 在 PowerDNS 中配置域名 NS 记录
+	if domain.RootDomain != nil {
+		var nameservers []string
+		if err := json.Unmarshal([]byte(domain.Nameservers), &nameservers); err == nil {
+			go h.updateDomainNSRecordsInPowerDNS(&domain, nameservers, domain.UseDefaultNameservers)
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Domain created successfully",
+		"domain":  domain.ToResponse(),
+	})
+}
+
 // CleanupExpiredDomains 自动清理过期域名
 // 删除过期超过指定天数的域名及其 DNS 记录
 func (h *DomainHandler) CleanupExpiredDomains(daysAfterExpiry int) {

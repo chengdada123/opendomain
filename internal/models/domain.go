@@ -78,6 +78,14 @@ type DomainRegisterRequest struct {
 	CouponCode   *string `json:"coupon_code,omitempty"`
 }
 
+// AdminCreateDomainRequest 管理员为指定用户创建域名请求
+type AdminCreateDomainRequest struct {
+	UserID       uint   `json:"user_id" binding:"required"`
+	Subdomain    string `json:"subdomain" binding:"required,min=1,max=63"`
+	RootDomainID uint   `json:"root_domain_id" binding:"required"`
+	Years        int    `json:"years" binding:"omitempty,min=1,max=10"`
+}
+
 // DomainResponse 域名响应
 type DomainResponse struct {
 	ID                    uint          `json:"id"`

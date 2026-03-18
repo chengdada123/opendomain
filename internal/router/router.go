@@ -217,6 +217,7 @@ func Setup(db *gorm.DB, rdb *redis.Client, cfg *config.Config) *gin.Engine {
 			admin.DELETE("/users/:id", userHandler.AdminDeleteUser)
 			admin.GET("/domains", domainHandler.ListAllDomains)
 			admin.GET("/domains/stats", domainHandler.GetDomainStatusStats)
+			admin.POST("/domains", domainHandler.AdminCreateDomainForUser)
 			admin.PUT("/domains/:id/status", domainHandler.AdminUpdateDomainStatus)
 			admin.DELETE("/domains/:id", domainHandler.AdminDeleteDomain)
 			admin.POST("/sync-fossbilling-domains", fossBillingSyncHandler.AdminSyncAllDomains)
