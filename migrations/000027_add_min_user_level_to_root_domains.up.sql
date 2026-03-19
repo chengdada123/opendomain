@@ -1,0 +1,1 @@
+ALTER TABLE root_domains ADD COLUMN IF NOT EXISTS min_user_level VARCHAR(20) NOT NULL DEFAULT 'normal';

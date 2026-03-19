@@ -279,6 +279,16 @@ func (h *DomainHandler) RegisterDomain(c *gin.Context) {
 		return
 	}
 
+	// 检查用户等级是否满足根域名要求
+	if userLevelOrder(user.UserLevel) < userLevelOrder(rootDomain.MinUserLevel) {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":          "Your account level is too low to register under this domain",
+			"required_level": rootDomain.MinUserLevel,
+			"your_level":     user.UserLevel,
+		})
+		return
+	}
+
 	// 检查是否为付费域名
 	if !rootDomain.IsFree {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -1371,6 +1381,22 @@ func (h *DomainHandler) GetDomainStatusStats(c *gin.Context) {
 	})
 }
 
+// userLevelOrder 返回用户等级对应的数值（数值越大等级越高）
+func userLevelOrder(level string) int {
+	switch level {
+	case "basic":
+		return 1
+	case "member":
+		return 2
+	case "regular":
+		return 3
+	case "leader":
+		return 4
+	default: // normal
+		return 0
+	}
+}
+
 // isValidSubdomain 验证子域名格式
 func isValidSubdomain(subdomain string) bool {
 	// 长度检查
@@ -1423,6 +1449,7 @@ func (h *DomainHandler) CreateRootDomain(c *gin.Context) {
 		IsHot                 bool     `json:"is_hot"`
 		IsNew                 bool     `json:"is_new"`
 		IsFree                bool     `json:"is_free"`
+		MinUserLevel          string   `json:"min_user_level"`
 		PricePerYear          *float64 `json:"price_per_year"`
 		LifetimePrice         *float64 `json:"lifetime_price"`
 		UseDefaultNameservers bool     `json:"use_default_nameservers"`
@@ -1466,6 +1493,11 @@ func (h *DomainHandler) CreateRootDomain(c *gin.Context) {
 		nameserversJSON = string(nsBytes)
 	}
 
+	minLevel := req.MinUserLevel
+	if minLevel == "" {
+		minLevel = "normal"
+	}
+
 	rootDomain := &models.RootDomain{
 		Domain:                req.Domain,
 		Description:           req.Description,
@@ -1474,6 +1506,7 @@ func (h *DomainHandler) CreateRootDomain(c *gin.Context) {
 		IsHot:                 req.IsHot,
 		IsNew:                 req.IsNew,
 		IsFree:                req.IsFree,
+		MinUserLevel:          minLevel,
 		PricePerYear:          req.PricePerYear,
 		LifetimePrice:         req.LifetimePrice,
 		UseDefaultNameservers: req.UseDefaultNameservers,
@@ -1516,6 +1549,7 @@ func (h *DomainHandler) UpdateRootDomain(c *gin.Context) {
 		IsHot                 *bool    `json:"is_hot"`
 		IsNew                 *bool    `json:"is_new"`
 		IsFree                *bool    `json:"is_free"`
+		MinUserLevel          *string  `json:"min_user_level"`
 		PricePerYear          *float64 `json:"price_per_year"`
 		LifetimePrice         *float64 `json:"lifetime_price"`
 		UseDefaultNameservers *bool    `json:"use_default_nameservers"`
@@ -1562,6 +1596,10 @@ func (h *DomainHandler) UpdateRootDomain(c *gin.Context) {
 	if req.LifetimePrice != nil {
 		updates["lifetime_price"] = *req.LifetimePrice
 		selectFields = append(selectFields, "lifetime_price")
+	}
+	if req.MinUserLevel != nil {
+		updates["min_user_level"] = *req.MinUserLevel
+		selectFields = append(selectFields, "min_user_level")
 	}
 	if req.UseDefaultNameservers != nil {
 		updates["use_default_nameservers"] = *req.UseDefaultNameservers

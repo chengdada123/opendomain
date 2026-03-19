@@ -23,6 +23,7 @@ type RootDomain struct {
 	PricePerYear          *float64  `gorm:"type:decimal(10,2)" json:"price_per_year,omitempty"`
 	LifetimePrice         *float64  `gorm:"type:decimal(10,2)" json:"lifetime_price,omitempty"`
 	IsFree                bool      `gorm:"default:true" json:"is_free"`
+	MinUserLevel          string    `gorm:"size:20;default:normal" json:"min_user_level"` // normal/basic/member/regular/leader
 	CreatedAt             time.Time `json:"created_at"`
 	UpdatedAt             time.Time `json:"updated_at"`
 }

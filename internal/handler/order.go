@@ -146,6 +146,21 @@ func (h *OrderHandler) CreateOrder(c *gin.Context) {
 		return
 	}
 
+	// 获取用户信息并检查等级要求
+	var user models.User
+	if err := h.db.First(&user, userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+	if userLevelOrder(user.UserLevel) < userLevelOrder(rootDomain.MinUserLevel) {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":          "Your account level is too low to register under this domain",
+			"required_level": rootDomain.MinUserLevel,
+			"your_level":     user.UserLevel,
+		})
+		return
+	}
+
 	// 检查是否为免费域名
 	if rootDomain.IsFree {
 		c.JSON(http.StatusBadRequest, gin.H{

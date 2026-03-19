@@ -85,7 +85,7 @@
             <!-- Search Result -->
             <transition name="slide-fade">
               <div v-if="searchResult" class="mt-6">
-                <div v-if="searchResult.available" class="alert alert-success shadow-lg border-2 border-success/20">
+                <div v-if="searchResult.available && !searchResult.levelTooLow" class="alert alert-success shadow-lg border-2 border-success/20">
                   <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
@@ -123,6 +123,20 @@
                     </svg>
                     {{ searchResult.isFree ? $t('home.registerFree') : $t('home.proceedToCheckout') }}
                   </button>
+                </div>
+                <!-- Level too low warning -->
+                <div v-else-if="searchResult.levelTooLow" class="alert alert-info shadow-lg border-2 border-info/20">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <div class="flex-1">
+                    <h3 class="font-bold">{{ $t('home.levelTooLow') }}</h3>
+                    <p class="text-sm opacity-80 mt-1">
+                      {{ $t('home.requiredLevel') }}：<span class="font-semibold">{{ $t(`home.levelNames.${searchResult.requiredLevel}`) }}</span>
+                      &nbsp;/&nbsp;
+                      {{ $t('home.yourLevel') }}：<span class="font-semibold">{{ $t(`home.levelNames.${searchResult.yourLevel}`) }}</span>
+                    </p>
+                  </div>
                 </div>
                 <div v-else class="alert alert-warning shadow-lg border-2 border-warning/20">
                   <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
@@ -355,6 +369,11 @@ const fetchRootDomains = async () => {
   }
 }
 
+const levelOrder = (level) => {
+  const map = { normal: 0, basic: 1, member: 2, regular: 3, leader: 4 }
+  return map[level] ?? 0
+}
+
 const searchDomain = async () => {
   if (!searchQuery.value || !selectedRootDomain.value) return
 
@@ -372,8 +391,16 @@ const searchDomain = async () => {
     // 获取选中的根域名信息
     const rootDomain = rootDomains.value.find(d => d.id === selectedRootDomain.value)
 
+    // 检查用户等级是否满足根域名要求
+    const minLevel = rootDomain?.min_user_level || 'normal'
+    const userLevel = authStore.user?.user_level || 'normal'
+    const tooLow = isAuthenticated.value && levelOrder(userLevel) < levelOrder(minLevel)
+
     searchResult.value = {
       available: response.data.available,
+      levelTooLow: tooLow,
+      requiredLevel: minLevel,
+      yourLevel: userLevel,
       message: response.data.available
         ? `${response.data.full_domain} is available!`
         : `${response.data.full_domain} is already taken.`,
@@ -433,6 +460,14 @@ const registerDomain = async () => {
           root_domain_id: selectedRootDomain.value,
         },
       })
+    } else if (error.response?.status === 403 && errorData?.required_level) {
+      // 等级不足，更新 searchResult 显示提示
+      searchResult.value = {
+        ...searchResult.value,
+        levelTooLow: true,
+        requiredLevel: errorData.required_level,
+        yourLevel: errorData.your_level || authStore.user?.user_level || 'normal',
+      }
     } else {
       toast.error(errorData?.error || 'Registration failed')
     }

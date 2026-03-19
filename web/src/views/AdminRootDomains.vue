@@ -325,6 +325,22 @@
 
             <div class="form-control">
               <label class="label">
+                <span class="label-text font-semibold">Min User Level</span>
+              </label>
+              <select v-model="formData.min_user_level" class="select select-bordered w-full">
+                <option value="normal">Normal</option>
+                <option value="basic">Basic</option>
+                <option value="member">Member</option>
+                <option value="regular">Regular</option>
+                <option value="leader">Leader</option>
+              </select>
+              <label class="label">
+                <span class="label-text-alt opacity-60">Only users at this level or above can register</span>
+              </label>
+            </div>
+
+            <div class="form-control">
+              <label class="label">
                 <span class="label-text font-semibold">Mark as Hot</span>
               </label>
               <label class="label cursor-pointer justify-start gap-3">
@@ -391,6 +407,7 @@ const formData = ref({
   is_hot: false,
   is_new: false,
   is_free: true,
+  min_user_level: 'normal',
   price_per_year: null,
   lifetime_price: null,
   use_default_nameservers: true,
@@ -461,6 +478,7 @@ const editDomain = (domain) => {
     is_hot: domain.is_hot,
     is_new: domain.is_new,
     is_free: domain.is_free ?? true,
+    min_user_level: domain.min_user_level || 'normal',
     price_per_year: domain.price_per_year || null,
     lifetime_price: domain.lifetime_price || null,
     use_default_nameservers: domain.use_default_nameservers ?? true,
@@ -482,6 +500,7 @@ const updateDomain = async () => {
       is_hot: formData.value.is_hot,
       is_new: formData.value.is_new,
       is_free: formData.value.is_free,
+      min_user_level: formData.value.min_user_level || 'normal',
       price_per_year: formData.value.is_free ? null : (formData.value.price_per_year || null),
       lifetime_price: formData.value.is_free ? null : (formData.value.lifetime_price || null),
       use_default_nameservers: formData.value.use_default_nameservers,
@@ -523,6 +542,7 @@ const closeModals = () => {
     is_hot: false,
     is_new: false,
     is_free: true,
+    min_user_level: 'normal',
     price_per_year: null,
     lifetime_price: null,
     use_default_nameservers: true,

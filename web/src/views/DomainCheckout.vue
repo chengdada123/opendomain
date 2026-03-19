@@ -324,7 +324,12 @@ const createOrderAndPay = async () => {
     window.location.href = redirectURL
   } catch (error) {
     console.error('Failed to create order:', error)
-    toast.error(error.response?.data?.error || 'Failed to create order')
+    const errorData = error.response?.data
+    if (error.response?.status === 403 && errorData?.required_level) {
+      toast.error(`${errorData.error} (required: ${errorData.required_level}, yours: ${errorData.your_level})`)
+    } else {
+      toast.error(errorData?.error || 'Failed to create order')
+    }
   } finally {
     creating.value = false
   }
