@@ -267,7 +267,7 @@
               </svg>
             </div>
             <div class="stat-title text-lg">{{ $t('home.totalDomains') }}</div>
-            <div class="stat-value text-primary text-5xl">10K+</div>
+            <div class="stat-value text-primary text-5xl">{{ totalDomains !== null ? totalDomains.toLocaleString() : '...' }}</div>
             <div class="stat-desc text-base">{{ $t('home.growing') }}</div>
           </div>
 
@@ -278,7 +278,7 @@
               </svg>
             </div>
             <div class="stat-title text-lg">{{ $t('home.activeUsers') }}</div>
-            <div class="stat-value text-secondary text-5xl">5K+</div>
+            <div class="stat-value text-secondary text-5xl">{{ totalUsers !== null ? totalUsers.toLocaleString() : '...' }}</div>
             <div class="stat-desc text-base">{{ $t('home.newUsers') }}</div>
           </div>
 
@@ -351,11 +351,25 @@ const rootDomains = ref([])
 const searchResult = ref(null)
 const loading = ref(false)
 
+const totalDomains = ref(null)
+const totalUsers = ref(null)
+
 const isAuthenticated = computed(() => authStore.isAuthenticated)
 
 onMounted(async () => {
   await fetchRootDomains()
+  await fetchPublicStats()
 })
+
+const fetchPublicStats = async () => {
+  try {
+    const response = await axios.get('/api/public/stats')
+    totalDomains.value = response.data.total_domains
+    totalUsers.value = response.data.total_users
+  } catch (error) {
+    console.error('Failed to fetch stats:', error)
+  }
+}
 
 const fetchRootDomains = async () => {
   try {

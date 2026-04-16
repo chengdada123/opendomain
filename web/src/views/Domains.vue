@@ -3,12 +3,6 @@
     <div class="flex justify-between items-center">
       <h1 class="text-4xl font-bold">{{ $t('domains.myDomains') }}</h1>
       <div class="flex gap-2">
-        <button v-if="fossbillingEnabled" @click="openSyncModal" class="btn btn-outline btn-secondary">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-          Sync from FOSSBilling
-        </button>
         <router-link to="/" class="btn btn-primary">
           {{ $t('domains.registerNew') }}
         </router-link>
@@ -29,12 +23,6 @@
         <p class="mb-4">{{ $t('domains.noDomainsDesc') }}</p>
         <div class="flex gap-3">
           <router-link to="/" class="btn btn-primary">{{ $t('domains.registerDomain') }}</router-link>
-          <button v-if="fossbillingEnabled" @click="openSyncModal" class="btn btn-outline btn-secondary">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-            Sync from FOSSBilling
-          </button>
         </div>
       </div>
     </div>
@@ -150,18 +138,6 @@
           </div><!-- end opacity wrapper -->
 
           <div class="card-actions justify-end mt-4 pt-3 border-t border-base-300 flex-wrap gap-2">
-            <button
-              v-if="domain.status === 'active'"
-              class="btn btn-sm"
-              :class="cpAccountByDomain[domain.id] ? 'btn-success' : 'btn-outline btn-success'"
-              @click="openCpHosting(domain)"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
-              </svg>
-              {{ cpAccountByDomain[domain.id] ? $t('domains.cpViewHosting') : $t('domains.cpApplyHosting') }}
-            </button>
-
             <div class="tooltip" :data-tip="isUsingDefaultNS(domain) ? $t('domains.manageDNS') : $t('domains.dnsTooltip')">
               <button
                 class="btn btn-sm btn-primary"

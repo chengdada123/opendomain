@@ -184,6 +184,20 @@ func (h *SettingHandler) GetDashboardStats(c *gin.Context) {
 	})
 }
 
+// GetPublicStats 公开接口：返回站点统计数据（无需认证）
+func (h *SettingHandler) GetPublicStats(c *gin.Context) {
+	var totalDomains int64
+	h.db.Model(&models.Domain{}).Where("status != ?", "deleted").Count(&totalDomains)
+
+	var totalUsers int64
+	h.db.Model(&models.User{}).Count(&totalUsers)
+
+	c.JSON(http.StatusOK, gin.H{
+		"total_domains": totalDomains,
+		"total_users":   totalUsers,
+	})
+}
+
 // GetPublicSiteConfig 公开接口：返回站点基本配置（无需认证）
 func (h *SettingHandler) GetPublicSiteConfig(c *gin.Context) {
 	// allow_password_register 从数据库读取

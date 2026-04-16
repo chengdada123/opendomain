@@ -64,6 +64,8 @@ func Setup(db *gorm.DB, rdb *redis.Client, cfg *config.Config) *gin.Engine {
 		{
 			// 站点配置
 			public.GET("/site-config", settingHandler.GetPublicSiteConfig)
+			// 站点统计 (公开)
+			public.GET("/stats", settingHandler.GetPublicStats)
 			// 根域名列表
 			public.GET("/root-domains", domainHandler.ListRootDomains)
 			// 公告列表
