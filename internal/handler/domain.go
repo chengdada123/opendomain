@@ -116,9 +116,9 @@ func (h *DomainHandler) SearchDomain(c *gin.Context) {
 
 	fullDomain := fmt.Sprintf("%s.%s", req.Subdomain, rootDomain.Domain)
 
-	// 检查是否已被注册（包括软删除的记录，因为唯一约束仍然生效）
+	// 检查是否已被注册（仅检查未软删除的记录，软删除的域名可重新注册）
 	var existingDomain models.Domain
-	err := h.db.Unscoped().Where("full_domain = ?", fullDomain).First(&existingDomain).Error
+	err := h.db.Where("full_domain = ?", fullDomain).First(&existingDomain).Error
 
 	available := err == gorm.ErrRecordNotFound
 
@@ -313,12 +313,16 @@ func (h *DomainHandler) RegisterDomain(c *gin.Context) {
 
 	fullDomain := fmt.Sprintf("%s.%s", req.Subdomain, rootDomain.Domain)
 
-	// 检查是否已存在（包括软删除的记录，因为唯一约束仍生效）
+	// 检查是否已存在活跃记录（未软删除）
 	var existingDomain models.Domain
-	if err := h.db.Unscoped().Where("full_domain = ?", fullDomain).First(&existingDomain).Error; err == nil {
+	if err := h.db.Where("full_domain = ?", fullDomain).First(&existingDomain).Error; err == nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "Domain already registered"})
 		return
 	}
+
+	// 检查是否存在软删除记录（唯一约束仍生效，需在事务内恢复而非新建）
+	var softDeletedDomain models.Domain
+	hasSoftDeleted := h.db.Unscoped().Where("full_domain = ? AND deleted_at IS NOT NULL", fullDomain).First(&softDeletedDomain).Error == nil
 
 	// 检查是否在待激活列表中（从FOSSBilling预同步的域名）
 	var pendingDomain models.PendingDomain
@@ -373,24 +377,50 @@ func (h *DomainHandler) RegisterDomain(c *gin.Context) {
 
 	// 开始事务注册域名
 	err := h.db.Transaction(func(tx *gorm.DB) error {
-		// 创建域名
 		now := timeutil.Now()
-		domain := &models.Domain{
-			UserID:                userID,
-			RootDomainID:          req.RootDomainID,
-			Subdomain:             req.Subdomain,
-			FullDomain:            fullDomain,
-			Status:                "active",
-			RegisteredAt:          now,
-			ExpiresAt:             now.AddDate(1, 0, 0), // 1 年后过期
-			AutoRenew:             false,
-			Nameservers:           rootDomain.Nameservers,
-			UseDefaultNameservers: rootDomain.UseDefaultNameservers,
-			DNSSynced:             false,
-		}
+		var domain *models.Domain
 
-		if err := tx.Create(domain).Error; err != nil {
-			return err
+		if hasSoftDeleted {
+			// 恢复软删除记录并重新分配给当前用户
+			updates := map[string]interface{}{
+				"user_id":                 userID,
+				"root_domain_id":          req.RootDomainID,
+				"subdomain":               req.Subdomain,
+				"status":                  "active",
+				"registered_at":           now,
+				"expires_at":              now.AddDate(1, 0, 0),
+				"auto_renew":              false,
+				"nameservers":             rootDomain.Nameservers,
+				"use_default_nameservers": rootDomain.UseDefaultNameservers,
+				"dns_synced":              false,
+				"dns_sync_error":          nil,
+				"first_failed_at":         nil,
+				"suspended_at":            nil,
+				"suspend_reason":          nil,
+				"deleted_at":              nil,
+			}
+			if err := tx.Unscoped().Model(&softDeletedDomain).Updates(updates).Error; err != nil {
+				return err
+			}
+			domain = &softDeletedDomain
+		} else {
+			// 创建新域名记录
+			domain = &models.Domain{
+				UserID:                userID,
+				RootDomainID:          req.RootDomainID,
+				Subdomain:             req.Subdomain,
+				FullDomain:            fullDomain,
+				Status:                "active",
+				RegisteredAt:          now,
+				ExpiresAt:             now.AddDate(1, 0, 0), // 1 年后过期
+				AutoRenew:             false,
+				Nameservers:           rootDomain.Nameservers,
+				UseDefaultNameservers: rootDomain.UseDefaultNameservers,
+				DNSSynced:             false,
+			}
+			if err := tx.Create(domain).Error; err != nil {
+				return err
+			}
 		}
 
 		// 如果使用了优惠券，记录使用
