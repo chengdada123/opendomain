@@ -122,11 +122,11 @@ func (h *DomainHandler) SearchDomain(c *gin.Context) {
 
 	available := err == gorm.ErrRecordNotFound
 
-	// 检查是否在待激活列表中（包括软删除的pending记录，这类域名属于FOSSBilling订单）
+	// 检查是否在待激活列表中（不包括软删除的pending记录，已删除则可注册）
 	reserved := false
 	if available {
 		var pendingDomain models.PendingDomain
-		if err := h.db.Unscoped().Where("full_domain = ?", fullDomain).First(&pendingDomain).Error; err == nil {
+		if err := h.db.Where("full_domain = ?", fullDomain).First(&pendingDomain).Error; err == nil {
 			available = false
 			reserved = true
 		}
