@@ -106,7 +106,7 @@ func (h *DomainHandler) SearchDomain(c *gin.Context) {
 	}
 
 	// 检查黑名单
-	if isBlacklisted(req.Subdomain) {
+	if isBlacklisted(h.db, req.Subdomain) {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":     "This subdomain is reserved",
 			"available": false,
@@ -122,15 +122,7 @@ func (h *DomainHandler) SearchDomain(c *gin.Context) {
 
 	available := err == gorm.ErrRecordNotFound
 
-	// 检查是否在待激活列表中（不包括软删除的pending记录，已删除则可注册）
 	reserved := false
-	if available {
-		var pendingDomain models.PendingDomain
-		if err := h.db.Where("full_domain = ?", fullDomain).First(&pendingDomain).Error; err == nil {
-			available = false
-			reserved = true
-		}
-	}
 
 	response := gin.H{
 		"available":   available,
@@ -306,7 +298,7 @@ func (h *DomainHandler) RegisterDomain(c *gin.Context) {
 		return
 	}
 
-	if isBlacklisted(req.Subdomain) {
+	if isBlacklisted(h.db, req.Subdomain) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "This subdomain is reserved"})
 		return
 	}
@@ -323,16 +315,6 @@ func (h *DomainHandler) RegisterDomain(c *gin.Context) {
 	// 检查是否存在软删除记录（唯一约束仍生效，需在事务内恢复而非新建）
 	var softDeletedDomain models.Domain
 	hasSoftDeleted := h.db.Unscoped().Where("full_domain = ? AND deleted_at IS NOT NULL", fullDomain).First(&softDeletedDomain).Error == nil
-
-	// 检查是否在待激活列表中（从FOSSBilling预同步的域名）
-	var pendingDomain models.PendingDomain
-	if err := h.db.Where("full_domain = ? AND deleted_at IS NULL", fullDomain).First(&pendingDomain).Error; err == nil {
-		c.JSON(http.StatusConflict, gin.H{
-			"error":    "This domain is reserved and can only be activated by syncing from FOSSBilling",
-			"reserved": true,
-		})
-		return
-	}
 
 	// 检查用户配额
 	var userDomainCount int64
@@ -1440,15 +1422,30 @@ func isValidSubdomain(subdomain string) bool {
 	return matched
 }
 
-// isBlacklisted 检查是否在黑名单中
-func isBlacklisted(subdomain string) bool {
-	blacklist := []string{
-		"admin", "root", "api", "www", "mail", "smtp", "ftp", "ssh", "dns",
-		"test", "demo", "dev", "stage", "prod", "blog", "forum", "shop",
-		"status", "support", "help", "docs", "cdn", "static", "assets",
+// defaultBlacklist is the fallback when no DB setting is found
+var defaultBlacklist = []string{
+	"admin", "root", "api", "www", "mail", "smtp", "ftp", "ssh", "dns",
+	"test", "demo", "dev", "stage", "prod", "blog", "forum", "shop",
+	"status", "support", "help", "docs", "cdn", "static", "assets",
+}
+
+// isBlacklisted 检查子域名是否在黑名单中（黑名单从 system_settings 读取）
+func isBlacklisted(db *gorm.DB, subdomain string) bool {
+	raw := models.GetSettingValue(db, "subdomain_blacklist", "")
+
+	var list []string
+	if raw == "" {
+		list = defaultBlacklist
+	} else {
+		for _, entry := range strings.Split(raw, ",") {
+			entry = strings.TrimSpace(entry)
+			if entry != "" {
+				list = append(list, entry)
+			}
+		}
 	}
 
-	for _, word := range blacklist {
+	for _, word := range list {
 		if subdomain == word {
 			return true
 		}

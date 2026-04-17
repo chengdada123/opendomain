@@ -302,7 +302,8 @@ func (h *PaymentHandler) HandleCallback(c *gin.Context) {
 		// 开始事务处理
 		if err := h.processSuccessfulPayment(&payment, &order, &req, now, clientIP); err != nil {
 			fmt.Printf("Failed to process payment: %v\n", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process payment"})
+			errMsg := fmt.Sprintf("Failed to process payment: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": errMsg})
 			return
 		}
 
@@ -482,26 +483,55 @@ func (h *PaymentHandler) processSuccessfulPayment(
 			// 获取根域名的 NS 设置
 			var rd models.RootDomain
 			if err := tx.First(&rd, order.RootDomainID).Error; err != nil {
-				return err
+				return fmt.Errorf("root domain not found: %w", err)
 			}
 
-			// 创建域名
-			domain := &models.Domain{
-				UserID:                order.UserID,
-				RootDomainID:          order.RootDomainID,
-				Subdomain:             order.Subdomain,
-				FullDomain:            order.FullDomain,
-				Status:                "active",
-				RegisteredAt:          now,
-				ExpiresAt:             expiresAt,
-				AutoRenew:             false,
-				Nameservers:           rd.Nameservers,
-				UseDefaultNameservers: rd.UseDefaultNameservers,
-				DNSSynced:             false,
-			}
+			// 检查是否存在软删除记录（unique constraint 依然生效，需要恢复而非新建）
+			var softDeleted models.Domain
+			hasSoftDeleted := tx.Unscoped().Where("full_domain = ? AND deleted_at IS NOT NULL", order.FullDomain).First(&softDeleted).Error == nil
 
-			if err := tx.Create(domain).Error; err != nil {
-				return err
+			var domain *models.Domain
+			if hasSoftDeleted {
+				// 恢复软删除记录并重新分配
+				updates := map[string]interface{}{
+					"user_id":                 order.UserID,
+					"root_domain_id":          order.RootDomainID,
+					"subdomain":               order.Subdomain,
+					"status":                  "active",
+					"registered_at":           now,
+					"expires_at":              expiresAt,
+					"auto_renew":              false,
+					"nameservers":             rd.Nameservers,
+					"use_default_nameservers": rd.UseDefaultNameservers,
+					"dns_synced":              false,
+					"dns_sync_error":          nil,
+					"first_failed_at":         nil,
+					"suspended_at":            nil,
+					"suspend_reason":          nil,
+					"deleted_at":              nil,
+				}
+				if err := tx.Unscoped().Model(&softDeleted).Updates(updates).Error; err != nil {
+					return fmt.Errorf("failed to restore domain %s: %w", order.FullDomain, err)
+				}
+				domain = &softDeleted
+			} else {
+				// 创建新域名记录
+				domain = &models.Domain{
+					UserID:                order.UserID,
+					RootDomainID:          order.RootDomainID,
+					Subdomain:             order.Subdomain,
+					FullDomain:            order.FullDomain,
+					Status:                "active",
+					RegisteredAt:          now,
+					ExpiresAt:             expiresAt,
+					AutoRenew:             false,
+					Nameservers:           rd.Nameservers,
+					UseDefaultNameservers: rd.UseDefaultNameservers,
+					DNSSynced:             false,
+				}
+				if err := tx.Create(domain).Error; err != nil {
+					return fmt.Errorf("failed to create domain %s: %w", order.FullDomain, err)
+				}
 			}
 
 			// 更新订单

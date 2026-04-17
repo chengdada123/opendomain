@@ -179,6 +179,14 @@ func (h *OrderHandler) CreateOrder(c *gin.Context) {
 		return
 	}
 
+	// 检查子域名格式及黑名单
+	if isBlacklisted(h.db, req.Subdomain) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": fmt.Sprintf("Subdomain '%s' is reserved and cannot be registered", req.Subdomain),
+		})
+		return
+	}
+
 	// 计算价格
 	var basePrice float64
 	if req.IsLifetime {
