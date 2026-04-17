@@ -93,6 +93,38 @@
         </div>
       </div>
 
+      <!-- Subdomain Blacklist Settings -->
+      <div class="card bg-base-100 shadow-xl lg:col-span-2">
+        <div class="card-body">
+          <h2 class="card-title">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+            </svg>
+            保留子域名黑名单
+          </h2>
+          <div class="text-sm opacity-70 mb-4">逗号分隔的保留子域名列表，这些子域名不允许用户注册。留空则使用系统默认值。</div>
+          <div class="form-control">
+            <textarea
+              v-model="subdomainBlacklist"
+              class="textarea textarea-bordered w-full font-mono text-sm"
+              rows="4"
+              placeholder="admin,root,api,www,mail,smtp,ftp,ssh,dns,..."
+              @blur="updateBlacklistSetting"
+            />
+            <label class="label">
+              <span class="label-text-alt">每个条目精确匹配子域名，不区分大小写。修改后立即生效，无需重启。</span>
+            </label>
+            <div v-if="blacklistSaving" class="text-sm text-info mt-2">
+              <span class="loading loading-spinner loading-xs mr-1"></span>
+              保存中...
+            </div>
+            <div v-if="blacklistSaved" class="text-sm text-success mt-2">
+              ✓ 已保存
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Currency Settings -->
       <div class="card bg-base-100 shadow-xl">
         <div class="card-body">
@@ -492,6 +524,10 @@ const currencySymbol = ref('NL')
 const currencySaving = ref(false)
 const currencySaved = ref(false)
 
+const subdomainBlacklist = ref('')
+const blacklistSaving = ref(false)
+const blacklistSaved = ref(false)
+
 const fetchSettings = async () => {
   quotaLoading.value = true
   try {
@@ -505,6 +541,7 @@ const fetchSettings = async () => {
       }
       if (setting.setting_key === 'allow_password_register') siteSettings.allow_password_register = setting.setting_value
       if (setting.setting_key === 'currency_symbol') currencySymbol.value = setting.setting_value || 'NL'
+      if (setting.setting_key === 'subdomain_blacklist') subdomainBlacklist.value = setting.setting_value || ''
     }
   } catch (err) {
     console.error('Failed to fetch settings:', err)
@@ -571,6 +608,20 @@ const updateCurrencySetting = async () => {
   } catch (err) {
     currencySaving.value = false
     toast.error(t('adminSettings.updateFailed') + ': ' + (err.response?.data?.error || err.message))
+  }
+}
+
+const updateBlacklistSetting = async () => {
+  blacklistSaving.value = true
+  blacklistSaved.value = false
+  try {
+    await axios.put('/api/admin/settings/subdomain_blacklist', { value: subdomainBlacklist.value.trim() })
+    blacklistSaving.value = false
+    blacklistSaved.value = true
+    setTimeout(() => { blacklistSaved.value = false }, 2000)
+  } catch (err) {
+    blacklistSaving.value = false
+    toast.error('保存失败: ' + (err.response?.data?.error || err.message))
   }
 }
 
