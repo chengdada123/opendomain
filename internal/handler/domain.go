@@ -1273,6 +1273,7 @@ func (h *DomainHandler) TransferDomain(c *gin.Context) {
 func (h *DomainHandler) ListAllDomains(c *gin.Context) {
 	search := c.Query("search")
 	status := c.Query("status") // 按状态筛选
+	email := c.Query("email")   // 按邮箱精确筛选
 	page := 1
 	pageSize := 20
 
@@ -1295,6 +1296,12 @@ func (h *DomainHandler) ListAllDomains(c *gin.Context) {
 		query = query.Where("status = ?", status)
 	}
 
+	// 邮箱精确筛选
+	if email != "" {
+		query = query.Joins("LEFT JOIN users ON users.id = domains.user_id").
+			Where("users.email = ?", email)
+	}
+
 	// 搜索功能：支持按域名、子域名、用户名、邮箱搜索
 	if search != "" {
 		query = query.Joins("LEFT JOIN users ON users.id = domains.user_id").
@@ -1311,7 +1318,7 @@ func (h *DomainHandler) ListAllDomains(c *gin.Context) {
 
 	// 分页查询（重新构建query以包含Preload）
 	var domains []models.Domain
-	offset := (page - 1) * pageSize
+
 	domainQuery := h.db.Preload("RootDomain").Preload("User")
 
 	// 状态筛选
@@ -1319,14 +1326,31 @@ func (h *DomainHandler) ListAllDomains(c *gin.Context) {
 		domainQuery = domainQuery.Where("status = ?", status)
 	}
 
+	// 邮箱精确筛选
+	if email != "" {
+		domainQuery = domainQuery.Joins("LEFT JOIN users ON users.id = domains.user_id").
+			Where("users.email = ?", email)
+	}
+
 	if search != "" {
 		domainQuery = domainQuery.Joins("LEFT JOIN users ON users.id = domains.user_id").
 			Where("domains.full_domain LIKE ? OR domains.subdomain LIKE ? OR users.username LIKE ? OR users.email LIKE ?",
 				"%"+search+"%", "%"+search+"%", "%"+search+"%", "%"+search+"%")
 	}
-	if err := domainQuery.Order("domains.created_at DESC").Offset(offset).Limit(pageSize).Find(&domains).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch domains"})
-		return
+
+	// 如果指定了 email，不分页，返回所有匹配结果
+	if email != "" {
+		if err := domainQuery.Order("domains.created_at DESC").Find(&domains).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch domains"})
+			return
+		}
+	} else {
+		// 没有指定 email，正常分页
+		offset := (page - 1) * pageSize
+		if err := domainQuery.Order("domains.created_at DESC").Offset(offset).Limit(pageSize).Find(&domains).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch domains"})
+			return
+		}
 	}
 
 	responses := make([]*models.DomainResponse, len(domains))
@@ -1334,20 +1358,29 @@ func (h *DomainHandler) ListAllDomains(c *gin.Context) {
 		responses[i] = domain.ToResponse()
 	}
 
-	totalPages := int(total) / pageSize
-	if int(total)%pageSize != 0 {
-		totalPages++
+	// 构建响应
+	response := gin.H{
+		"domains": responses,
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"domains": responses,
-		"pagination": gin.H{
+	// 只有没有指定 email 时才返回分页信息
+	if email == "" {
+		totalPages := int(total) / pageSize
+		if int(total)%pageSize != 0 {
+			totalPages++
+		}
+		response["pagination"] = gin.H{
 			"page":        page,
 			"page_size":   pageSize,
 			"total":       total,
 			"total_pages": totalPages,
-		},
-	})
+		}
+	} else {
+		// 指定 email 时，只返回总数
+		response["total"] = total
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 // GetDomainStatusStats 管理员：获取域名状态统计
