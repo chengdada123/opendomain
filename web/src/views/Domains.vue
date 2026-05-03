@@ -351,7 +351,7 @@
 
         <!-- Default Nameservers (Read-only) -->
         <div v-if="!useCustomNS" class="form-control space-y-3">
-          <div v-for="(ns, index) in ['ns1.nodelook.com', 'ns2.nodelook.com']" :key="index" class="flex gap-2">
+          <div v-for="(ns, index) in defaultNameservers" :key="index" class="flex gap-2">
             <input
               :value="ns"
               type="text"
@@ -1075,6 +1075,20 @@ const selectedDomain = ref(null)
 // NS modification
 const nameservers = ref(['', ''])
 const useCustomNS = ref(false)
+const defaultNameservers = computed(() => {
+  try {
+    const raw = selectedDomain.value?.root_domain?.nameservers
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed
+      }
+    }
+  } catch (e) {
+    // ignore and fallback
+  }
+  return ['ns1.nodelook.com', 'ns2.nodelook.com']
+})
 
 // Renew
 const renewYears = ref(1)
@@ -1398,7 +1412,7 @@ const saveNameservers = async () => {
     }
   } else {
     // Use default nameservers
-    nsToSave = ['ns1.nodelook.com', 'ns2.nodelook.com']
+    nsToSave = defaultNameservers.value
   }
 
   submitting.value = true
