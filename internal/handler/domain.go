@@ -2183,7 +2183,7 @@ func (h *DomainHandler) updateDomainNSRecordsInVPS8(domain *models.Domain, names
 	}
 
 	records, _ := recordsResp["result"].([]interface{})
-	targetID := 0
+	existingByValue := map[string]int{}
 	for _, item := range records {
 		m, ok := item.(map[string]interface{})
 		if !ok {
@@ -2191,53 +2191,57 @@ func (h *DomainHandler) updateDomainNSRecordsInVPS8(domain *models.Domain, names
 		}
 		typeVal := strings.ToUpper(strings.TrimSpace(fmt.Sprintf("%v", m["type"])))
 		hostVal := strings.Trim(strings.TrimSpace(fmt.Sprintf("%v", m["host"])), ".")
-		if typeVal == "NS" && hostVal == subHost {
-			if idFloat, ok := m["id"].(float64); ok {
-				targetID = int(idFloat)
-				break
+		if typeVal != "NS" || hostVal != subHost {
+			continue
+		}
+		idFloat, ok := m["id"].(float64)
+		if !ok {
+			continue
+		}
+		value := strings.ToLower(strings.Trim(strings.TrimSpace(fmt.Sprintf("%v", m["value"])), "."))
+		if value == "" {
+			continue
+		}
+		existingByValue[value] = int(idFloat)
+	}
+
+	targetSet := map[string]bool{}
+	if !isDefault {
+		for _, ns := range nameservers {
+			v := strings.ToLower(strings.Trim(strings.TrimSpace(ns), "."))
+			if v != "" {
+				targetSet[v] = true
 			}
+		}
+		if len(targetSet) == 0 {
+			return fmt.Errorf("nameservers cannot be empty")
 		}
 	}
 
-	if isDefault {
-		if targetID > 0 {
-			_, err := h.vps8CallRaw(baseURL, apiUser, apiKey, "/api/client/dnsopenapi/record_delete", map[string]interface{}{"domain": rootDomain, "id": targetID})
-			if err != nil {
+	for value, id := range existingByValue {
+		if !targetSet[value] {
+			if _, err := h.vps8CallRaw(baseURL, apiUser, apiKey, "/api/client/dnsopenapi/record_delete", map[string]interface{}{"domain": rootDomain, "id": id}); err != nil {
 				return err
 			}
 		}
-		return nil
 	}
 
-	if len(nameservers) == 0 {
-		return fmt.Errorf("nameservers cannot be empty")
-	}
-
-	targetNS := strings.Trim(strings.TrimSpace(nameservers[0]), ".")
-	if targetNS == "" {
-		return fmt.Errorf("nameserver cannot be empty")
-	}
-
-	if targetID > 0 {
-		_, err := h.vps8CallRaw(baseURL, apiUser, apiKey, "/api/client/dnsopenapi/record_update", map[string]interface{}{
+	for value := range targetSet {
+		if _, exists := existingByValue[value]; exists {
+			continue
+		}
+		if _, err := h.vps8CallRaw(baseURL, apiUser, apiKey, "/api/client/dnsopenapi/record_create", map[string]interface{}{
 			"domain": rootDomain,
-			"id":     targetID,
 			"host":   subHost,
 			"type":   "NS",
-			"value":  targetNS,
+			"value":  value,
 			"ttl":    3600,
-		})
-		return err
+		}); err != nil {
+			return err
+		}
 	}
 
-	_, err = h.vps8CallRaw(baseURL, apiUser, apiKey, "/api/client/dnsopenapi/record_create", map[string]interface{}{
-		"domain": rootDomain,
-		"host":   subHost,
-		"type":   "NS",
-		"value":  targetNS,
-		"ttl":    3600,
-	})
-	return err
+	return nil
 }
 
 func (h *DomainHandler) vps8CallRaw(baseURL, user, key, path string, payload map[string]interface{}) (map[string]interface{}, error) {
