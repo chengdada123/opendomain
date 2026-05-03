@@ -84,8 +84,12 @@ type PaymentConfig struct {
 }
 
 type DNSConfig struct {
-	DefaultNS1 string
-	DefaultNS2 string
+	DefaultNS1      string
+	DefaultNS2      string
+	Provider        string
+	VPS8OpenAPIURL  string
+	VPS8OpenAPIKey  string
+	VPS8OpenAPIUser string
 }
 
 type OAuthConfig struct {
@@ -190,8 +194,12 @@ func Load() (*Config, error) {
 		},
 
 		DNS: DNSConfig{
-			DefaultNS1: viper.GetString("DEFAULT_NS1"),
-			DefaultNS2: viper.GetString("DEFAULT_NS2"),
+			DefaultNS1:      viper.GetString("DEFAULT_NS1"),
+			DefaultNS2:      viper.GetString("DEFAULT_NS2"),
+			Provider:        viper.GetString("DNS_PROVIDER"),
+			VPS8OpenAPIURL:  viper.GetString("VPS8_OPENAPI_URL"),
+			VPS8OpenAPIKey:  viper.GetString("VPS8_OPENAPI_KEY"),
+			VPS8OpenAPIUser: viper.GetString("VPS8_OPENAPI_USER"),
 		},
 
 		OAuth: OAuthConfig{
@@ -248,6 +256,8 @@ func setDefaults() {
 
 	viper.SetDefault("DEFAULT_NS1", "ns1.nodelook.com")
 	viper.SetDefault("DEFAULT_NS2", "ns2.nodelook.com")
+	viper.SetDefault("DNS_PROVIDER", "powerdns")
+	viper.SetDefault("VPS8_OPENAPI_USER", "client")
 
 	viper.SetDefault("FOSSBILLING_ENABLED", false)
 	viper.SetDefault("CYBERPANEL_ENCRYPTION_KEY", "change-this-secret-key-32-chars!")

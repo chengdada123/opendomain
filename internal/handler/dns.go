@@ -1,7 +1,10 @@
 package handler
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -45,6 +48,11 @@ func ensureCanonicalNS(nameservers []string) []string {
 
 // ListRecords 获取域名的 DNS 记录列表
 func (h *DNSHandler) ListRecords(c *gin.Context) {
+	if h.useVPS8OpenAPI() {
+		h.listRecordsViaVPS8(c)
+		return
+	}
+
 	userID, exists := middleware.GetUserID(c)
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
@@ -115,6 +123,11 @@ func (h *DNSHandler) GetRecord(c *gin.Context) {
 
 // CreateRecord 创建 DNS 记录
 func (h *DNSHandler) CreateRecord(c *gin.Context) {
+	if h.useVPS8OpenAPI() {
+		h.createRecordViaVPS8(c)
+		return
+	}
+
 	userID, exists := middleware.GetUserID(c)
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
@@ -220,6 +233,11 @@ func (h *DNSHandler) CreateRecord(c *gin.Context) {
 
 // UpdateRecord 更新 DNS 记录
 func (h *DNSHandler) UpdateRecord(c *gin.Context) {
+	if h.useVPS8OpenAPI() {
+		h.updateRecordViaVPS8(c)
+		return
+	}
+
 	userID, exists := middleware.GetUserID(c)
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
@@ -308,6 +326,11 @@ func (h *DNSHandler) UpdateRecord(c *gin.Context) {
 
 // DeleteRecord 删除 DNS 记录
 func (h *DNSHandler) DeleteRecord(c *gin.Context) {
+	if h.useVPS8OpenAPI() {
+		h.deleteRecordViaVPS8(c)
+		return
+	}
+
 	userID, exists := middleware.GetUserID(c)
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
@@ -361,6 +384,218 @@ func (h *DNSHandler) DeleteRecord(c *gin.Context) {
 	go h.deleteRecordFromPowerDNS(&record, &domain)
 
 	c.JSON(http.StatusOK, gin.H{"message": "DNS record deleted successfully"})
+}
+
+func (h *DNSHandler) useVPS8OpenAPI() bool {
+	return strings.EqualFold(strings.TrimSpace(h.cfg.DNS.Provider), "vps8_openapi")
+}
+
+func (h *DNSHandler) getVPS8Auth() (string, string, string) {
+	baseURL := strings.TrimRight(strings.TrimSpace(h.cfg.DNS.VPS8OpenAPIURL), "/")
+	user := strings.TrimSpace(h.cfg.DNS.VPS8OpenAPIUser)
+	if user == "" {
+		user = "client"
+	}
+	return baseURL, user, strings.TrimSpace(h.cfg.DNS.VPS8OpenAPIKey)
+}
+
+func (h *DNSHandler) vps8Call(path string, payload map[string]interface{}) (map[string]interface{}, error) {
+	baseURL, user, key := h.getVPS8Auth()
+	if baseURL == "" || key == "" {
+		return nil, fmt.Errorf("vps8 openapi not configured: VPS8_OPENAPI_URL/VPS8_OPENAPI_KEY required")
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, baseURL+path, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, err
+	}
+	req.SetBasicAuth(user, key)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := (&http.Client{}).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var apiResp map[string]interface{}
+	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+		return nil, fmt.Errorf("vps8 response parse failed: %w", err)
+	}
+
+	if errObj, ok := apiResp["error"].(map[string]interface{}); ok && errObj != nil {
+		msg, _ := errObj["message"].(string)
+		if msg == "" {
+			msg = "vps8 openapi returned error"
+		}
+		return nil, fmt.Errorf("%s", msg)
+	}
+
+	return apiResp, nil
+}
+
+func (h *DNSHandler) listRecordsViaVPS8(c *gin.Context) {
+	domain, ok := h.getOwnedDomainForRequest(c)
+	if !ok {
+		return
+	}
+
+	apiResp, err := h.vps8Call("/api/client/dnsopenapi/record_list", map[string]interface{}{"domain": domain.FullDomain})
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+
+	result, _ := apiResp["result"].([]interface{})
+	records := make([]gin.H, 0, len(result))
+	for _, row := range result {
+		m, ok := row.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		records = append(records, gin.H{
+			"id": m["id"], "domain_id": domain.ID, "name": m["host"], "type": m["type"], "content": m["value"],
+			"ttl": m["ttl"], "priority": m["priority"], "is_active": true, "synced_to_powerdns": true,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"records": records})
+}
+
+func (h *DNSHandler) createRecordViaVPS8(c *gin.Context) {
+	domain, ok := h.getOwnedDomainForRequest(c)
+	if !ok {
+		return
+	}
+
+	var req models.DNSRecordCreateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.TTL == 0 {
+		req.TTL = 3600
+	}
+	if req.Type == "NS" && (req.Name == "" || req.Name == "@") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Creating apex (@) NS records is not allowed via OpenAPI."})
+		return
+	}
+
+	apiResp, err := h.vps8Call("/api/client/dnsopenapi/record_create", map[string]interface{}{
+		"domain": domain.FullDomain, "host": req.Name, "type": req.Type, "value": req.Content, "ttl": req.TTL, "priority": req.Priority,
+	})
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "DNS record created successfully", "record": apiResp["result"]})
+}
+
+func (h *DNSHandler) updateRecordViaVPS8(c *gin.Context) {
+	domain, ok := h.getOwnedDomainForRequest(c)
+	if !ok {
+		return
+	}
+	recordID := c.Param("recordId")
+
+	var req models.DNSRecordUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	payload := map[string]interface{}{"domain": domain.FullDomain, "id": toInt(recordID)}
+	if req.Name != nil {
+		payload["host"] = *req.Name
+	}
+	if req.Type != nil {
+		payload["type"] = *req.Type
+	}
+	if req.Content != nil {
+		payload["value"] = *req.Content
+	}
+	if req.TTL != nil {
+		payload["ttl"] = *req.TTL
+	}
+	if req.Priority != nil {
+		payload["priority"] = *req.Priority
+	}
+
+	if t, okType := payload["type"].(string); okType && strings.EqualFold(t, "NS") {
+		host, _ := payload["host"].(string)
+		if strings.TrimSpace(host) == "" || strings.TrimSpace(host) == "@" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Creating apex (@) NS records is not allowed via OpenAPI."})
+			return
+		}
+	}
+
+	apiResp, err := h.vps8Call("/api/client/dnsopenapi/record_update", payload)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "DNS record updated successfully", "record": apiResp["result"]})
+}
+
+func (h *DNSHandler) deleteRecordViaVPS8(c *gin.Context) {
+	domain, ok := h.getOwnedDomainForRequest(c)
+	if !ok {
+		return
+	}
+	recordID := c.Param("recordId")
+
+	_, err := h.vps8Call("/api/client/dnsopenapi/record_delete", map[string]interface{}{"domain": domain.FullDomain, "id": toInt(recordID)})
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "DNS record deleted successfully"})
+}
+
+func (h *DNSHandler) getOwnedDomainForRequest(c *gin.Context) (*models.Domain, bool) {
+	userID, exists := middleware.GetUserID(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return nil, false
+	}
+
+	domainID := c.Param("domainId")
+	var domain models.Domain
+	if err := h.db.Preload("RootDomain").First(&domain, domainID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Domain not found"})
+		return nil, false
+	}
+	if domain.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return nil, false
+	}
+	if domain.Status == "abuse" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "This domain has been flagged for abuse. All operations are disabled."})
+		return nil, false
+	}
+	if !domain.UseDefaultNameservers {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":         "Cannot manage DNS records for domains using custom nameservers. Please manage DNS records on your custom nameserver.",
+			"use_custom_ns": true,
+		})
+		return nil, false
+	}
+
+	return &domain, true
+}
+
+func toInt(s string) int {
+	n, _ := strconv.Atoi(strings.TrimSpace(s))
+	return n
 }
 
 // normalizeUserContent 规范化用户输入的 DNS 记录内容，存入 DB 前清理
