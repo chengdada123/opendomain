@@ -450,7 +450,14 @@ func (h *DNSHandler) listRecordsViaVPS8(c *gin.Context) {
 		return
 	}
 
-	apiResp, err := h.vps8Call("/api/client/dnsopenapi/record_list", map[string]interface{}{"domain": domain.FullDomain})
+	zoneDomain, baseHost, err := h.resolveVPS8ZoneForDomain(domain.FullDomain)
+	if err != nil {
+		status, msg := mapVPS8APIError(err)
+		c.JSON(status, gin.H{"error": msg})
+		return
+	}
+
+	apiResp, err := h.vps8Call("/api/client/dnsopenapi/record_list", map[string]interface{}{"domain": zoneDomain})
 	if err != nil {
 		status, msg := mapVPS8APIError(err)
 		c.JSON(status, gin.H{"error": msg})
@@ -464,8 +471,15 @@ func (h *DNSHandler) listRecordsViaVPS8(c *gin.Context) {
 		if !ok {
 			continue
 		}
+
+		host := strings.TrimSpace(fmt.Sprintf("%v", m["host"]))
+		recordName, include := mapVPS8HostToRecordName(host, baseHost)
+		if !include {
+			continue
+		}
+
 		records = append(records, gin.H{
-			"id": m["id"], "domain_id": domain.ID, "name": m["host"], "type": m["type"], "content": m["value"],
+			"id": m["id"], "domain_id": domain.ID, "name": recordName, "type": m["type"], "content": m["value"],
 			"ttl": m["ttl"], "priority": m["priority"], "is_active": true, "synced_to_powerdns": true,
 		})
 	}
@@ -491,8 +505,16 @@ func (h *DNSHandler) createRecordViaVPS8(c *gin.Context) {
 		return
 	}
 
+	zoneDomain, baseHost, err := h.resolveVPS8ZoneForDomain(domain.FullDomain)
+	if err != nil {
+		status, msg := mapVPS8APIError(err)
+		c.JSON(status, gin.H{"error": msg})
+		return
+	}
+
+	mappedHost := mapRecordNameToVPS8Host(req.Name, baseHost)
 	apiResp, err := h.vps8Call("/api/client/dnsopenapi/record_create", map[string]interface{}{
-		"domain": domain.FullDomain, "host": req.Name, "type": req.Type, "value": req.Content, "ttl": req.TTL, "priority": req.Priority,
+		"domain": zoneDomain, "host": mappedHost, "type": req.Type, "value": req.Content, "ttl": req.TTL, "priority": req.Priority,
 	})
 	if err != nil {
 		status, msg := mapVPS8APIError(err)
@@ -515,9 +537,16 @@ func (h *DNSHandler) updateRecordViaVPS8(c *gin.Context) {
 		return
 	}
 
-	payload := map[string]interface{}{"domain": domain.FullDomain, "id": toInt(recordID)}
+	zoneDomain, baseHost, err := h.resolveVPS8ZoneForDomain(domain.FullDomain)
+	if err != nil {
+		status, msg := mapVPS8APIError(err)
+		c.JSON(status, gin.H{"error": msg})
+		return
+	}
+
+	payload := map[string]interface{}{"domain": zoneDomain, "id": toInt(recordID)}
 	if req.Name != nil {
-		payload["host"] = *req.Name
+		payload["host"] = mapRecordNameToVPS8Host(*req.Name, baseHost)
 	}
 	if req.Type != nil {
 		payload["type"] = *req.Type
@@ -556,7 +585,14 @@ func (h *DNSHandler) deleteRecordViaVPS8(c *gin.Context) {
 	}
 	recordID := c.Param("recordId")
 
-	_, err := h.vps8Call("/api/client/dnsopenapi/record_delete", map[string]interface{}{"domain": domain.FullDomain, "id": toInt(recordID)})
+	zoneDomain, _, err := h.resolveVPS8ZoneForDomain(domain.FullDomain)
+	if err != nil {
+		status, msg := mapVPS8APIError(err)
+		c.JSON(status, gin.H{"error": msg})
+		return
+	}
+
+	_, err = h.vps8Call("/api/client/dnsopenapi/record_delete", map[string]interface{}{"domain": zoneDomain, "id": toInt(recordID)})
 	if err != nil {
 		status, msg := mapVPS8APIError(err)
 		c.JSON(status, gin.H{"error": msg})
@@ -600,6 +636,88 @@ func (h *DNSHandler) getOwnedDomainForRequest(c *gin.Context) (*models.Domain, b
 func toInt(s string) int {
 	n, _ := strconv.Atoi(strings.TrimSpace(s))
 	return n
+}
+
+func (h *DNSHandler) resolveVPS8ZoneForDomain(fullDomain string) (zoneDomain string, baseHost string, err error) {
+	apiResp, err := h.vps8Call("/api/client/dnsopenapi/domain_list", map[string]interface{}{})
+	if err != nil {
+		return "", "", err
+	}
+
+	list, _ := apiResp["result"].([]interface{})
+	domain := strings.ToLower(strings.TrimSpace(fullDomain))
+	best := ""
+	for _, item := range list {
+		m, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		cand := strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", m["domain"])))
+		if cand == "" {
+			continue
+		}
+		if domain == cand || strings.HasSuffix(domain, "."+cand) {
+			if len(cand) > len(best) {
+				best = cand
+			}
+		}
+	}
+
+	if best == "" {
+		return "", "", fmt.Errorf("Domain does not exist")
+	}
+
+	if domain == best {
+		return best, "@", nil
+	}
+
+	prefix := strings.TrimSuffix(domain, "."+best)
+	prefix = strings.Trim(prefix, ".")
+	if prefix == "" {
+		prefix = "@"
+	}
+	return best, prefix, nil
+}
+
+func mapRecordNameToVPS8Host(recordName string, baseHost string) string {
+	name := strings.TrimSpace(recordName)
+	if name == "" || name == "@" {
+		return baseHost
+	}
+	if baseHost == "" || baseHost == "@" {
+		return name
+	}
+	return name + "." + baseHost
+}
+
+func mapVPS8HostToRecordName(host string, baseHost string) (string, bool) {
+	h := strings.Trim(strings.TrimSpace(host), ".")
+	if h == "" {
+		return "", false
+	}
+
+	if baseHost == "" || baseHost == "@" {
+		if h == "@" {
+			return "@", true
+		}
+		return h, true
+	}
+
+	if h == baseHost {
+		return "@", true
+	}
+
+	suffix := "." + baseHost
+	if strings.HasSuffix(h, suffix) {
+		prefix := strings.TrimSuffix(h, suffix)
+		prefix = strings.Trim(prefix, ".")
+		if prefix == "" {
+			return "@", true
+		}
+		return prefix, true
+	}
+
+	return "", false
 }
 
 func mapVPS8APIError(err error) (int, string) {
