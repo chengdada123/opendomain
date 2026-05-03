@@ -971,6 +971,80 @@ func (h *DomainHandler) ModifyNameservers(c *gin.Context) {
 	})
 }
 
+func (h *DomainHandler) SetVPS8DirectManage(c *gin.Context) {
+	if !strings.EqualFold(strings.TrimSpace(h.cfg.DNS.Provider), "vps8_openapi") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "This feature requires DNS_PROVIDER=vps8_openapi"})
+		return
+	}
+
+	userID, exists := middleware.GetUserID(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	domainID := c.Param("id")
+	var domain models.Domain
+	if err := h.db.Preload("RootDomain").First(&domain, domainID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Domain not found"})
+		return
+	}
+	if domain.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	vps8NS := []string{"ns1.vps8.zz.cd", "ns2.vps8.zz.cd"}
+	var targetNS []string
+	isDefault := false
+	if req.Enabled {
+		targetNS = vps8NS
+		isDefault = false
+	} else {
+		isDefault = true
+		if domain.RootDomain == nil || strings.TrimSpace(domain.RootDomain.Nameservers) == "" {
+			targetNS = []string{h.cfg.DNS.DefaultNS1, h.cfg.DNS.DefaultNS2}
+		} else {
+			if err := json.Unmarshal([]byte(domain.RootDomain.Nameservers), &targetNS); err != nil || len(targetNS) == 0 {
+				targetNS = []string{h.cfg.DNS.DefaultNS1, h.cfg.DNS.DefaultNS2}
+			}
+		}
+	}
+
+	nameserversJSON, err := json.Marshal(targetNS)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to encode nameservers"})
+		return
+	}
+
+	if err := h.db.Model(&domain).Updates(map[string]interface{}{
+		"nameservers":             string(nameserversJSON),
+		"use_default_nameservers": isDefault,
+	}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update nameservers"})
+		return
+	}
+
+	if err := h.updateDomainNSRecordsInVPS8(&domain, targetNS, isDefault); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":     "VPS8 direct management updated successfully",
+		"enabled":     req.Enabled,
+		"nameservers": targetNS,
+	})
+}
+
 // RenewDomain 续费域名
 func (h *DomainHandler) RenewDomain(c *gin.Context) {
 	userID, exists := middleware.GetUserID(c)

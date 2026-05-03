@@ -130,6 +130,7 @@ func Setup(db *gorm.DB, rdb *redis.Client, cfg *config.Config) *gin.Engine {
 				domains.GET("/:id", domainHandler.GetDomain)
 				domains.DELETE("/:id", domainHandler.DeleteDomain)
 				domains.PUT("/:id/nameservers", domainHandler.ModifyNameservers)
+				domains.PUT("/:id/vps8-direct-manage", domainHandler.SetVPS8DirectManage)
 				domains.POST("/:id/renew", domainHandler.RenewDomain)
 				domains.POST("/:id/transfer", domainHandler.TransferDomain)
 				domains.GET("/:id/dnssec", domainHandler.GetDomainDNSSEC)

@@ -138,12 +138,12 @@
           </div><!-- end opacity wrapper -->
 
           <div class="card-actions justify-end mt-4 pt-3 border-t border-base-300 flex-wrap gap-2">
-            <div class="tooltip" :data-tip="isUsingDefaultNS(domain) ? $t('domains.manageDNS') : $t('domains.dnsTooltip')">
+            <div class="tooltip" :data-tip="isVPS8DirectManaged(domain) ? '请托管该域名到 https://vps8.zz.cd 进行管理' : (isUsingDefaultNS(domain) ? $t('domains.manageDNS') : $t('domains.dnsTooltip'))">
               <button
                 class="btn btn-sm btn-primary"
                 @click="manageDNS(domain)"
-                :disabled="!isUsingDefaultNS(domain)"
-                :class="{ 'btn-disabled': !isUsingDefaultNS(domain) }"
+                :disabled="!isUsingDefaultNS(domain) || isVPS8DirectManaged(domain)"
+                :class="{ 'btn-disabled': !isUsingDefaultNS(domain) || isVPS8DirectManaged(domain) }"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -166,6 +166,12 @@
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
                   </svg>
                   {{ $t('domains.modifyNameservers') }}
+                </a></li>
+                <li><a @click="toggleVPS8DirectManage(domain)" class="flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer hover:bg-base-200 active:bg-base-300">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 16v-2m8-6h-2M6 12H4m12.243 5.657l-1.414-1.414M9.172 9.172 7.757 7.757m8.486 0-1.414 1.415M9.172 14.828l-1.415 1.415" />
+                  </svg>
+                  {{ isVPS8DirectManaged(domain) ? '关闭在 VPS8 直接管理' : '开启在 VPS8 直接管理' }}
                 </a></li>
                 <li><a @click="openRenew(domain)" class="flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer hover:bg-base-200 active:bg-base-300">
                   <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1361,12 +1367,43 @@ const isUsingDefaultNS = (domain) => {
   return domain.use_default_nameservers
 }
 
+const isVPS8DirectManaged = (domain) => {
+  try {
+    const ns = JSON.parse(domain.nameservers || '[]')
+    if (!Array.isArray(ns)) return false
+    const normalized = ns.map(item => String(item).trim().toLowerCase())
+    return normalized.includes('ns1.vps8.zz.cd') && normalized.includes('ns2.vps8.zz.cd')
+  } catch (e) {
+    return false
+  }
+}
+
 const manageDNS = (domain) => {
+  if (isVPS8DirectManaged(domain)) {
+    toast.warning('请托管该域名到 https://vps8.zz.cd 进行管理')
+    return
+  }
   if (!isUsingDefaultNS(domain)) {
     toast.warning('DNS management is only available for domains using default nameservers')
     return
   }
   router.push(`/domains/${domain.id}/dns`)
+}
+
+const toggleVPS8DirectManage = async (domain) => {
+  const enabling = !isVPS8DirectManaged(domain)
+  if (enabling) {
+    const ok = confirm('开启后将清理现有委派并添加 NS 到 ns1/ns2.vps8.zz.cd，DNS 管理按钮将不可用。是否继续？')
+    if (!ok) return
+  }
+
+  try {
+    await axios.put(`/api/domains/${domain.id}/vps8-direct-manage`, { enabled: enabling })
+    toast.success(enabling ? '已开启在 VPS8 直接管理' : '已关闭在 VPS8 直接管理')
+    await fetchDomains()
+  } catch (error) {
+    toast.error(error.response?.data?.error || 'Failed to update VPS8 direct management')
+  }
 }
 
 // Nameserver Management
