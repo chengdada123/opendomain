@@ -452,7 +452,8 @@ func (h *DNSHandler) listRecordsViaVPS8(c *gin.Context) {
 
 	apiResp, err := h.vps8Call("/api/client/dnsopenapi/record_list", map[string]interface{}{"domain": domain.FullDomain})
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		status, msg := mapVPS8APIError(err)
+		c.JSON(status, gin.H{"error": msg})
 		return
 	}
 
@@ -494,7 +495,8 @@ func (h *DNSHandler) createRecordViaVPS8(c *gin.Context) {
 		"domain": domain.FullDomain, "host": req.Name, "type": req.Type, "value": req.Content, "ttl": req.TTL, "priority": req.Priority,
 	})
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		status, msg := mapVPS8APIError(err)
+		c.JSON(status, gin.H{"error": msg})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "DNS record created successfully", "record": apiResp["result"]})
@@ -540,7 +542,8 @@ func (h *DNSHandler) updateRecordViaVPS8(c *gin.Context) {
 
 	apiResp, err := h.vps8Call("/api/client/dnsopenapi/record_update", payload)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		status, msg := mapVPS8APIError(err)
+		c.JSON(status, gin.H{"error": msg})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "DNS record updated successfully", "record": apiResp["result"]})
@@ -555,7 +558,8 @@ func (h *DNSHandler) deleteRecordViaVPS8(c *gin.Context) {
 
 	_, err := h.vps8Call("/api/client/dnsopenapi/record_delete", map[string]interface{}{"domain": domain.FullDomain, "id": toInt(recordID)})
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		status, msg := mapVPS8APIError(err)
+		c.JSON(status, gin.H{"error": msg})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "DNS record deleted successfully"})
@@ -596,6 +600,30 @@ func (h *DNSHandler) getOwnedDomainForRequest(c *gin.Context) (*models.Domain, b
 func toInt(s string) int {
 	n, _ := strconv.Atoi(strings.TrimSpace(s))
 	return n
+}
+
+func mapVPS8APIError(err error) (int, string) {
+	if err == nil {
+		return http.StatusBadGateway, "upstream DNS API error"
+	}
+
+	msg := err.Error()
+	lower := strings.ToLower(msg)
+
+	switch {
+	case strings.Contains(lower, "not configured"):
+		return http.StatusInternalServerError, "DNS backend is not configured"
+	case strings.Contains(lower, "domain is required"), strings.Contains(lower, "id is required"), strings.Contains(lower, "unsupported record type"), strings.Contains(lower, "apex (@) ns"):
+		return http.StatusBadRequest, msg
+	case strings.Contains(lower, "record not found"), strings.Contains(lower, "not found"):
+		return http.StatusNotFound, msg
+	case strings.Contains(lower, "access is disabled"), strings.Contains(lower, "suspended"):
+		return http.StatusForbidden, msg
+	case strings.Contains(lower, "429"), strings.Contains(lower, "rate limit"):
+		return http.StatusTooManyRequests, "DNS API rate limit exceeded"
+	default:
+		return http.StatusBadGateway, msg
+	}
 }
 
 // normalizeUserContent 规范化用户输入的 DNS 记录内容，存入 DB 前清理
