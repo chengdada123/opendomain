@@ -3,8 +3,11 @@ package handler
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"net/http"
+	"net/smtp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -72,13 +75,14 @@ func (h *UserHandler) Register(c *gin.Context) {
 	// 创建用户 (从 settings 读取默认配额)
 	defaultQuota := GetQuotaForLevel(h.db, "normal")
 	user := &models.User{
-		Username:     req.Username,
-		Email:        req.Email,
-		PasswordHash: string(hashedPassword),
-		InviteCode:   inviteCode,
-		UserLevel:    "normal",
-		DomainQuota:  defaultQuota,
-		Status:       "active",
+		Username:      req.Username,
+		Email:         req.Email,
+		PasswordHash:  string(hashedPassword),
+		InviteCode:    inviteCode,
+		UserLevel:     "normal",
+		DomainQuota:   defaultQuota,
+		Status:        "active",
+		EmailVerified: false,
 	}
 
 	// 开始事务处理邀请码和奖励
@@ -141,10 +145,72 @@ func (h *UserHandler) Register(c *gin.Context) {
 
 	tx.Commit()
 
+	verifyToken, err := generateEmailVerifyToken(user, h.cfg)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate email verification token"})
+		return
+	}
+
+	if err := h.sendVerificationEmail(user.Email, verifyToken); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to send verification email: " + err.Error()})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"message": middleware.T(c, "success.user_created"),
 		"user":    user.ToResponse(),
 	})
+}
+
+func (h *UserHandler) VerifyEmail(c *gin.Context) {
+	var req struct {
+		Token string `json:"token" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": middleware.T(c, "error.validation")})
+		return
+	}
+
+	claims := &jwt.MapClaims{}
+	token, err := jwt.ParseWithClaims(req.Token, claims, func(token *jwt.Token) (interface{}, error) {
+		return []byte(h.cfg.JWT.Secret), nil
+	})
+	if err != nil || !token.Valid {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid verification token"})
+		return
+	}
+
+	purpose, _ := (*claims)["purpose"].(string)
+	if purpose != "email_verify" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid verification token purpose"})
+		return
+	}
+
+	uidFloat, ok := (*claims)["user_id"].(float64)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid verification token payload"})
+		return
+	}
+	userID := uint(uidFloat)
+
+	var user models.User
+	if err := h.db.First(&user, userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	if user.EmailVerified {
+		c.JSON(http.StatusOK, gin.H{"message": "email already verified"})
+		return
+	}
+
+	user.EmailVerified = true
+	if err := h.db.Save(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to verify email"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "email verified successfully"})
 }
 
 // Login 用户登录
@@ -178,6 +244,10 @@ func (h *UserHandler) Login(c *gin.Context) {
 	// 检查账号状态
 	if user.Status != "active" {
 		c.JSON(http.StatusForbidden, gin.H{"error": middleware.T(c, "error.forbidden")})
+		return
+	}
+	if !user.EmailVerified {
+		c.JSON(http.StatusForbidden, gin.H{"error": "email_not_verified"})
 		return
 	}
 
@@ -523,6 +593,38 @@ func generateToken(user *models.User, cfg *config.Config) (string, error) {
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(cfg.JWT.Secret))
+}
+
+func generateEmailVerifyToken(user *models.User, cfg *config.Config) (string, error) {
+	claims := jwt.MapClaims{
+		"user_id": user.ID,
+		"email":   user.Email,
+		"purpose": "email_verify",
+		"exp":     timeutil.Now().Add(24 * time.Hour).Unix(),
+		"iat":     timeutil.Now().Unix(),
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(cfg.JWT.Secret))
+}
+
+func (h *UserHandler) sendVerificationEmail(email, token string) error {
+	verifyURL := strings.TrimRight(h.cfg.FrontendURL, "/") + "/verify-email?token=" + token
+	subject := "OpenDomain - Verify your email"
+	body := "Please verify your email by opening this link:\r\n" + verifyURL + "\r\n\r\nIf you did not register, please ignore this email."
+
+	msg := []byte("From: " + h.cfg.Email.From + "\r\n" +
+		"To: " + email + "\r\n" +
+		"Subject: " + subject + "\r\n" +
+		"MIME-Version: 1.0\r\n" +
+		"Content-Type: text/plain; charset=UTF-8\r\n\r\n" +
+		body)
+
+	auth := smtp.PlainAuth("", h.cfg.Email.User, h.cfg.Email.Password, h.cfg.Email.Host)
+	addr := fmt.Sprintf("%s:%d", h.cfg.Email.Host, h.cfg.Email.Port)
+	if err := smtp.SendMail(addr, auth, h.cfg.Email.From, []string{email}, msg); err != nil {
+		return err
+	}
+	return nil
 }
 
 // generateInviteCode 生成邀请码
