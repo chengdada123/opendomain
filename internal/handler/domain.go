@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"regexp"
@@ -455,12 +457,19 @@ func (h *DomainHandler) RegisterDomain(c *gin.Context) {
 	var domain models.Domain
 	h.db.Preload("RootDomain").Where("full_domain = ?", fullDomain).First(&domain)
 
-	// 在 PowerDNS 中配置域名
 	if domain.RootDomain != nil {
 		var nameservers []string
 		if err := json.Unmarshal([]byte(domain.Nameservers), &nameservers); err == nil {
-			// 如果使用默认 NS 或自定义 NS，都调用此函数进行配置
-			go h.updateDomainNSRecordsInPowerDNS(&domain, nameservers, domain.UseDefaultNameservers)
+			if strings.EqualFold(strings.TrimSpace(h.cfg.DNS.Provider), "vps8_openapi") {
+				go func(d models.Domain, ns []string, isDefault bool) {
+					if e := h.updateDomainNSRecordsInVPS8(&d, ns, isDefault); e != nil {
+						fmt.Printf("Warning: Failed to sync NS records in VPS8 for %s: %v\n", d.FullDomain, e)
+					}
+				}(domain, nameservers, domain.UseDefaultNameservers)
+			} else {
+				// 如果使用默认 NS 或自定义 NS，都调用此函数进行配置
+				go h.updateDomainNSRecordsInPowerDNS(&domain, nameservers, domain.UseDefaultNameservers)
+			}
 		}
 	}
 
@@ -944,9 +953,16 @@ func (h *DomainHandler) ModifyNameservers(c *gin.Context) {
 		return
 	}
 
-	// 在 PowerDNS 中更新 NS 记录
-	if domain.RootDomain != nil {
-		go h.updateDomainNSRecordsInPowerDNS(&domain, req.Nameservers, isDefault)
+	if strings.EqualFold(strings.TrimSpace(h.cfg.DNS.Provider), "vps8_openapi") {
+		if err := h.updateDomainNSRecordsInVPS8(&domain, req.Nameservers, isDefault); err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+	} else {
+		// 在 PowerDNS 中更新 NS 记录
+		if domain.RootDomain != nil {
+			go h.updateDomainNSRecordsInPowerDNS(&domain, req.Nameservers, isDefault)
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -2059,7 +2075,15 @@ func (h *DomainHandler) AdminCreateDomainForUser(c *gin.Context) {
 	if domain.RootDomain != nil {
 		var nameservers []string
 		if err := json.Unmarshal([]byte(domain.Nameservers), &nameservers); err == nil {
-			go h.updateDomainNSRecordsInPowerDNS(&domain, nameservers, domain.UseDefaultNameservers)
+			if strings.EqualFold(strings.TrimSpace(h.cfg.DNS.Provider), "vps8_openapi") {
+				go func(d models.Domain, ns []string, isDefault bool) {
+					if e := h.updateDomainNSRecordsInVPS8(&d, ns, isDefault); e != nil {
+						fmt.Printf("Warning: Failed to sync NS records in VPS8 for %s: %v\n", d.FullDomain, e)
+					}
+				}(domain, nameservers, domain.UseDefaultNameservers)
+			} else {
+				go h.updateDomainNSRecordsInPowerDNS(&domain, nameservers, domain.UseDefaultNameservers)
+			}
 		}
 	}
 
@@ -2126,6 +2150,132 @@ func (h *DomainHandler) CleanupExpiredDomains(daysAfterExpiry int) {
 	}
 
 	fmt.Printf("Cleanup completed: %d domains deleted, %d failed.\n", successCount, failCount)
+}
+
+func (h *DomainHandler) updateDomainNSRecordsInVPS8(domain *models.Domain, nameservers []string, isDefault bool) error {
+	if domain == nil || domain.RootDomain == nil {
+		return fmt.Errorf("domain root info missing")
+	}
+
+	baseURL := strings.TrimRight(strings.TrimSpace(h.cfg.DNS.VPS8OpenAPIURL), "/")
+	apiKey := strings.TrimSpace(h.cfg.DNS.VPS8OpenAPIKey)
+	apiUser := strings.TrimSpace(h.cfg.DNS.VPS8OpenAPIUser)
+	if apiUser == "" {
+		apiUser = "client"
+	}
+	if baseURL == "" || apiKey == "" {
+		return fmt.Errorf("vps8 openapi not configured")
+	}
+
+	rootDomain := strings.TrimSpace(domain.RootDomain.Domain)
+	if rootDomain == "" {
+		return fmt.Errorf("root domain is empty")
+	}
+	subHost := strings.TrimSuffix(strings.TrimSpace(domain.FullDomain), "."+rootDomain)
+	subHost = strings.Trim(subHost, ".")
+	if subHost == "" {
+		return nil
+	}
+
+	recordsResp, err := h.vps8CallRaw(baseURL, apiUser, apiKey, "/api/client/dnsopenapi/record_list", map[string]interface{}{"domain": rootDomain})
+	if err != nil {
+		return err
+	}
+
+	records, _ := recordsResp["result"].([]interface{})
+	targetID := 0
+	for _, item := range records {
+		m, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		typeVal := strings.ToUpper(strings.TrimSpace(fmt.Sprintf("%v", m["type"])))
+		hostVal := strings.Trim(strings.TrimSpace(fmt.Sprintf("%v", m["host"])), ".")
+		if typeVal == "NS" && hostVal == subHost {
+			if idFloat, ok := m["id"].(float64); ok {
+				targetID = int(idFloat)
+				break
+			}
+		}
+	}
+
+	if isDefault {
+		if targetID > 0 {
+			_, err := h.vps8CallRaw(baseURL, apiUser, apiKey, "/api/client/dnsopenapi/record_delete", map[string]interface{}{"domain": rootDomain, "id": targetID})
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	if len(nameservers) == 0 {
+		return fmt.Errorf("nameservers cannot be empty")
+	}
+
+	targetNS := strings.Trim(strings.TrimSpace(nameservers[0]), ".")
+	if targetNS == "" {
+		return fmt.Errorf("nameserver cannot be empty")
+	}
+
+	if targetID > 0 {
+		_, err := h.vps8CallRaw(baseURL, apiUser, apiKey, "/api/client/dnsopenapi/record_update", map[string]interface{}{
+			"domain": rootDomain,
+			"id":     targetID,
+			"host":   subHost,
+			"type":   "NS",
+			"value":  targetNS,
+			"ttl":    3600,
+		})
+		return err
+	}
+
+	_, err = h.vps8CallRaw(baseURL, apiUser, apiKey, "/api/client/dnsopenapi/record_create", map[string]interface{}{
+		"domain": rootDomain,
+		"host":   subHost,
+		"type":   "NS",
+		"value":  targetNS,
+		"ttl":    3600,
+	})
+	return err
+}
+
+func (h *DomainHandler) vps8CallRaw(baseURL, user, key, path string, payload map[string]interface{}) (map[string]interface{}, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, baseURL+path, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, err
+	}
+	req.SetBasicAuth(user, key)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := (&http.Client{}).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var out map[string]interface{}
+	if err := json.Unmarshal(respBody, &out); err != nil {
+		return nil, fmt.Errorf("vps8 response parse failed: %w", err)
+	}
+	if errObj, ok := out["error"].(map[string]interface{}); ok && errObj != nil {
+		msg := strings.TrimSpace(fmt.Sprintf("%v", errObj["message"]))
+		if msg == "" {
+			msg = "vps8 openapi returned error"
+		}
+		return nil, fmt.Errorf("%s", msg)
+	}
+	return out, nil
 }
 
 // updateDomainNSRecordsInPowerDNS 更新域名在 PowerDNS root zone 中的 NS 记录
