@@ -1368,6 +1368,10 @@ const isUsingDefaultNS = (domain) => {
 }
 
 const isVPS8DirectManaged = (domain) => {
+  // Important: default nameserver mode should never be treated as "VPS8 direct manage",
+  // even if root-domain defaults are ns1/ns2.vps8.zz.cd.
+  if (domain?.use_default_nameservers) return false
+
   try {
     const ns = JSON.parse(domain.nameservers || '[]')
     if (!Array.isArray(ns)) return false
