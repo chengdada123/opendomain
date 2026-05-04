@@ -41,6 +41,16 @@
             <span>{{ error }}</span>
           </div>
 
+          <div v-if="showResendVerification" class="alert alert-info">
+            <div class="flex items-center justify-between w-full gap-2">
+              <span>邮箱未验证，可重发验证邮件。</span>
+              <button class="btn btn-sm btn-primary" :disabled="resendLoading" @click="resendVerification">
+                <span v-if="resendLoading" class="loading loading-spinner loading-xs"></span>
+                <span v-else>重发验证邮件</span>
+              </button>
+            </div>
+          </div>
+
           <div class="form-control mt-6">
             <button type="submit" class="btn btn-primary" :disabled="loading">
               <span v-if="loading" class="loading loading-spinner"></span>
@@ -99,6 +109,7 @@ import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useSiteConfigStore } from '../stores/siteConfig'
+import axios from '../utils/axios'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -120,7 +131,11 @@ const form = ref({
 })
 
 const loading = ref(false)
+const resendLoading = ref(false)
 const error = ref('')
+const showResendVerification = computed(() => {
+  return error.value === 'email_not_verified' && !!form.value.email
+})
 
 const handleLogin = async () => {
   loading.value = true
@@ -136,5 +151,23 @@ const handleLogin = async () => {
   }
 
   loading.value = false
+}
+
+const resendVerification = async () => {
+  if (!form.value.email) {
+    error.value = '请先输入注册邮箱。'
+    return
+  }
+  resendLoading.value = true
+  try {
+    const response = await axios.post('/api/auth/resend-verification', {
+      email: form.value.email,
+    })
+    error.value = response.data?.message || '验证邮件已发送，请查收。'
+  } catch (e) {
+    error.value = e.response?.data?.error || '重发验证邮件失败'
+  } finally {
+    resendLoading.value = false
+  }
 }
 </script>
