@@ -248,6 +248,90 @@ func (h *UserHandler) ResendVerificationEmail(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Verification email sent."})
 }
 
+func (h *UserHandler) ForgotPassword(c *gin.Context) {
+	var req struct {
+		Email string `json:"email" binding:"required,email"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": middleware.T(c, "error.validation")})
+		return
+	}
+
+	email := strings.TrimSpace(strings.ToLower(req.Email))
+	var user models.User
+	if err := h.db.Where("email = ?", email).First(&user).Error; err != nil {
+		c.JSON(http.StatusOK, gin.H{"message": "If the account exists, a reset email has been sent."})
+		return
+	}
+
+	token, err := generatePasswordResetToken(&user, h.cfg)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate password reset token"})
+		return
+	}
+	if err := h.sendPasswordResetEmail(user.Email, token); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to send password reset email: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "If the account exists, a reset email has been sent."})
+}
+
+func (h *UserHandler) ResetPassword(c *gin.Context) {
+	var req struct {
+		Token       string `json:"token" binding:"required"`
+		NewPassword string `json:"new_password" binding:"required,min=6"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": middleware.T(c, "error.validation")})
+		return
+	}
+
+	claims := &jwt.MapClaims{}
+	token, err := jwt.ParseWithClaims(req.Token, claims, func(token *jwt.Token) (interface{}, error) {
+		return []byte(h.cfg.JWT.Secret), nil
+	})
+	if err != nil || !token.Valid {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid reset token"})
+		return
+	}
+
+	purpose, _ := (*claims)["purpose"].(string)
+	if purpose != "password_reset" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid reset token purpose"})
+		return
+	}
+
+	uidFloat, ok := (*claims)["user_id"].(float64)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid reset token payload"})
+		return
+	}
+	userID := uint(uidFloat)
+
+	var user models.User
+	if err := h.db.First(&user, userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to hash password"})
+		return
+	}
+
+	if err := h.db.Model(&user).Updates(map[string]interface{}{
+		"password_hash": string(hashedPassword),
+		"updated_at":    timeutil.Now(),
+	}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update password"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Password reset successfully."})
+}
+
 // Login 用户登录
 // @Summary 用户登录
 // @Tags Auth
@@ -642,11 +726,35 @@ func generateEmailVerifyToken(user *models.User, cfg *config.Config) (string, er
 	return token.SignedString([]byte(cfg.JWT.Secret))
 }
 
+func generatePasswordResetToken(user *models.User, cfg *config.Config) (string, error) {
+	claims := jwt.MapClaims{
+		"user_id": user.ID,
+		"email":   user.Email,
+		"purpose": "password_reset",
+		"exp":     timeutil.Now().Add(1 * time.Hour).Unix(),
+		"iat":     timeutil.Now().Unix(),
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(cfg.JWT.Secret))
+}
+
 func (h *UserHandler) sendVerificationEmail(email, token string) error {
 	verifyURL := strings.TrimRight(h.cfg.FrontendURL, "/") + "/verify-email?token=" + token
 	subject := "OpenDomain - Verify your email"
 	body := "Please verify your email by opening this link:\r\n" + verifyURL + "\r\n\r\nIf you did not register, please ignore this email."
 
+	return h.sendPlainEmail(email, subject, body)
+}
+
+func (h *UserHandler) sendPasswordResetEmail(email, token string) error {
+	resetURL := strings.TrimRight(h.cfg.FrontendURL, "/") + "/reset-password?token=" + token
+	subject := "OpenDomain - Reset your password"
+	body := "You requested a password reset. Open this link to continue:\r\n" + resetURL + "\r\n\r\nIf this wasn't you, ignore this email."
+
+	return h.sendPlainEmail(email, subject, body)
+}
+
+func (h *UserHandler) sendPlainEmail(email, subject, body string) error {
 	msg := []byte("From: " + h.cfg.Email.From + "\r\n" +
 		"To: " + email + "\r\n" +
 		"Subject: " + subject + "\r\n" +
