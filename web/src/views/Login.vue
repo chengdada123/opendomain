@@ -175,7 +175,7 @@ const resendVerification = async () => {
 
 const handleForgotPassword = async () => {
   if (!form.value.email) {
-    toast.warning('请先输入邮箱，再点击忘记密码。')
+    error.value = '请先输入邮箱，再点击忘记密码。'
     return
   }
 
@@ -183,9 +183,9 @@ const handleForgotPassword = async () => {
     const response = await axios.post('/api/auth/forgot-password', {
       email: form.value.email,
     })
-    toast.success(response.data?.message || '如该邮箱存在，重置邮件已发送。')
+    error.value = response.data?.message || '如该邮箱存在，重置邮件已发送。'
   } catch (e) {
-    toast.error(e.response?.data?.error || '发送重置邮件失败')
+    error.value = e.response?.data?.error || '发送重置邮件失败'
   }
 }
 </script>
