@@ -30,7 +30,7 @@
               required
             />
             <label class="label">
-              <button type="button" class="label-text-alt link link-hover" @click="handleForgotPassword">
+              <button type="button" class="label-text-alt link link-hover" @click="openForgotPasswordModal">
                 {{ $t('login.forgotPassword') }}
               </button>
             </label>
@@ -104,6 +104,29 @@
       </div>
     </div>
   </div>
+
+  <dialog :class="{ 'modal': true, 'modal-open': showForgotModal }">
+    <div class="modal-box max-w-md">
+      <h3 class="font-bold text-xl mb-3">找回密码</h3>
+      <p class="text-sm opacity-70 mb-4">请输入注册邮箱，我们会发送重置链接。</p>
+
+      <div class="form-control">
+        <label class="label"><span class="label-text">邮箱</span></label>
+        <input v-model="forgotEmail" type="email" class="input input-bordered" placeholder="you@example.com" />
+      </div>
+
+      <div class="modal-action">
+        <button class="btn btn-ghost" @click="closeForgotPasswordModal">取消</button>
+        <button class="btn btn-primary" :disabled="forgotLoading" @click="submitForgotPassword">
+          <span v-if="forgotLoading" class="loading loading-spinner loading-xs"></span>
+          <span v-else>发送重置邮件</span>
+        </button>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+      <button type="button" @click="closeForgotPasswordModal">close</button>
+    </form>
+  </dialog>
 </template>
 
 <script setup>
@@ -134,6 +157,9 @@ const form = ref({
 
 const loading = ref(false)
 const resendLoading = ref(false)
+const forgotLoading = ref(false)
+const showForgotModal = ref(false)
+const forgotEmail = ref('')
 const error = ref('')
 const showResendVerification = computed(() => {
   return error.value === 'email_not_verified' && !!form.value.email
@@ -173,19 +199,33 @@ const resendVerification = async () => {
   }
 }
 
-const handleForgotPassword = async () => {
-  if (!form.value.email) {
-    error.value = '请先输入邮箱，再点击忘记密码。'
+const openForgotPasswordModal = () => {
+  forgotEmail.value = form.value.email || ''
+  showForgotModal.value = true
+}
+
+const closeForgotPasswordModal = () => {
+  showForgotModal.value = false
+  forgotLoading.value = false
+}
+
+const submitForgotPassword = async () => {
+  if (!forgotEmail.value) {
+    error.value = '请输入邮箱。'
     return
   }
 
+  forgotLoading.value = true
   try {
     const response = await axios.post('/api/auth/forgot-password', {
-      email: form.value.email,
+      email: forgotEmail.value,
     })
     error.value = response.data?.message || '如该邮箱存在，重置邮件已发送。'
+    showForgotModal.value = false
   } catch (e) {
     error.value = e.response?.data?.error || '发送重置邮件失败'
+  } finally {
+    forgotLoading.value = false
   }
 }
 </script>
