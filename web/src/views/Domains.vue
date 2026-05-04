@@ -120,7 +120,7 @@
               <!-- DNS Synced indicator -->
               <div class="flex items-center gap-1 text-xs">
                 <span class="text-base-content/40">DNS</span>
-                <span v-if="domain.dns_synced || domain.has_dns_records" class="inline-flex items-center gap-1 text-success font-medium">
+                <span v-if="domain.dns_synced || domain.has_dns_records || domain.scan_summary?.dns_status === 'resolved'" class="inline-flex items-center gap-1 text-success font-medium">
                   <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
                   </svg>
