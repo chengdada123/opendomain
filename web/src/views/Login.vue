@@ -30,7 +30,9 @@
               required
             />
             <label class="label">
-              <a href="#" class="label-text-alt link link-hover">{{ $t('login.forgotPassword') }}</a>
+              <button type="button" class="label-text-alt link link-hover" @click="handleForgotPassword">
+                {{ $t('login.forgotPassword') }}
+              </button>
             </label>
           </div>
 
@@ -169,5 +171,9 @@ const resendVerification = async () => {
   } finally {
     resendLoading.value = false
   }
+}
+
+const handleForgotPassword = () => {
+  toast.info('忘记密码功能暂未上线，请联系管理员重置密码。')
 }
 </script>
