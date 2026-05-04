@@ -1397,7 +1397,7 @@ const manageDNS = (domain) => {
 const toggleVPS8DirectManage = async (domain) => {
   const enabling = !isVPS8DirectManaged(domain)
   if (enabling) {
-    const ok = confirm('开启后将清理现有委派并添加 NS 到 ns1/ns2.vps8.zz.cd，DNS 管理按钮将不可用。是否继续？')
+    const ok = confirm('开启后会先删除该 host 的原有 DNS 记录（例如 CNAME/A/TXT 等冲突记录），再添加 NS 到 ns1/ns2.vps8.zz.cd；DNS 管理按钮将不可用。是否继续？')
     if (!ok) return
   }
 

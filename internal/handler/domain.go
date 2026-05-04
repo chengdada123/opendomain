@@ -2277,6 +2277,7 @@ func (h *DomainHandler) updateDomainNSRecordsInVPS8(domain *models.Domain, names
 
 	records, _ := recordsResp["result"].([]interface{})
 	existingByValue := map[string]int{}
+	conflictRecordIDs := []int{}
 	for _, item := range records {
 		m, ok := item.(map[string]interface{})
 		if !ok {
@@ -2284,18 +2285,26 @@ func (h *DomainHandler) updateDomainNSRecordsInVPS8(domain *models.Domain, names
 		}
 		typeVal := strings.ToUpper(strings.TrimSpace(fmt.Sprintf("%v", m["type"])))
 		hostVal := strings.Trim(strings.TrimSpace(fmt.Sprintf("%v", m["host"])), ".")
-		if typeVal != "NS" || hostVal != subHost {
+		if hostVal != subHost {
 			continue
 		}
 		idFloat, ok := m["id"].(float64)
 		if !ok {
 			continue
 		}
-		value := strings.ToLower(strings.Trim(strings.TrimSpace(fmt.Sprintf("%v", m["value"])), "."))
-		if value == "" {
+		recordID := int(idFloat)
+
+		if typeVal == "NS" {
+			value := strings.ToLower(strings.Trim(strings.TrimSpace(fmt.Sprintf("%v", m["value"])), "."))
+			if value == "" {
+				continue
+			}
+			existingByValue[value] = recordID
 			continue
 		}
-		existingByValue[value] = int(idFloat)
+
+		// Non-NS records under the same host may conflict with NS delegation (e.g. CNAME).
+		conflictRecordIDs = append(conflictRecordIDs, recordID)
 	}
 
 	targetSet := map[string]bool{}
@@ -2308,6 +2317,13 @@ func (h *DomainHandler) updateDomainNSRecordsInVPS8(domain *models.Domain, names
 		}
 		if len(targetSet) == 0 {
 			return fmt.Errorf("nameservers cannot be empty")
+		}
+
+		// Pre-clean conflicting records on same host (A/CNAME/TXT/...) before applying NS delegation.
+		for _, recordID := range conflictRecordIDs {
+			if _, err := h.vps8CallRaw(baseURL, apiUser, apiKey, "/api/client/dnsopenapi/record_delete", map[string]interface{}{"domain": rootDomain, "id": recordID}); err != nil {
+				return err
+			}
 		}
 	}
 
