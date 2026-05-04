@@ -545,6 +545,24 @@ func (h *DomainHandler) ListMyDomains(c *gin.Context) {
 		domainIDs[i] = domain.ID
 	}
 
+	// 统计每个域名的 DNS 记录数量（用于卡片状态展示）
+	type dnsCountRow struct {
+		DomainID uint
+		Cnt      int64
+	}
+	dnsCountMap := map[uint]int64{}
+	if len(domainIDs) > 0 {
+		var countRows []dnsCountRow
+		h.db.Model(&models.DNSRecord{}).
+			Select("domain_id, COUNT(*) as cnt").
+			Where("domain_id IN ?", domainIDs).
+			Group("domain_id").
+			Scan(&countRows)
+		for _, row := range countRows {
+			dnsCountMap[row.DomainID] = row.Cnt
+		}
+	}
+
 	var summaries []models.DomainScanSummary
 	if len(domainIDs) > 0 {
 		h.db.Where("domain_id IN ?", domainIDs).Find(&summaries)
@@ -576,6 +594,7 @@ func (h *DomainHandler) ListMyDomains(c *gin.Context) {
 			"suspended_at":            resp.SuspendedAt,
 			"suspend_reason":          resp.SuspendReason,
 			"root_domain":             resp.RootDomain,
+			"has_dns_records":         dnsCountMap[domain.ID] > 0,
 		}
 
 		// 添加扫描状态
