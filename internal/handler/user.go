@@ -213,6 +213,41 @@ func (h *UserHandler) VerifyEmail(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "email verified successfully"})
 }
 
+func (h *UserHandler) ResendVerificationEmail(c *gin.Context) {
+	var req struct {
+		Email string `json:"email" binding:"required,email"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": middleware.T(c, "error.validation")})
+		return
+	}
+
+	email := strings.TrimSpace(strings.ToLower(req.Email))
+	var user models.User
+	if err := h.db.Where("email = ?", email).First(&user).Error; err != nil {
+		// avoid user enumeration
+		c.JSON(http.StatusOK, gin.H{"message": "If the account exists, a verification email has been sent."})
+		return
+	}
+
+	if user.EmailVerified {
+		c.JSON(http.StatusOK, gin.H{"message": "Email already verified."})
+		return
+	}
+
+	token, err := generateEmailVerifyToken(&user, h.cfg)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate email verification token"})
+		return
+	}
+	if err := h.sendVerificationEmail(user.Email, token); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to send verification email: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Verification email sent."})
+}
+
 // Login 用户登录
 // @Summary 用户登录
 // @Tags Auth

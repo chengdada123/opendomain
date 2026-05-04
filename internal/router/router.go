@@ -95,6 +95,7 @@ func Setup(db *gorm.DB, rdb *redis.Client, cfg *config.Config) *gin.Engine {
 			auth.POST("/register", userHandler.Register)
 			auth.POST("/login", userHandler.Login)
 			auth.POST("/verify-email", userHandler.VerifyEmail)
+			auth.POST("/resend-verification", userHandler.ResendVerificationEmail)
 
 			// OAuth 路由
 			oauthHandler := handler.NewOAuthHandler(db, cfg)
