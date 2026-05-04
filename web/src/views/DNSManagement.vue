@@ -144,14 +144,6 @@
                 <option value="SRV">SRV</option>
                 <option value="CAA">CAA</option>
               </select>
-              <div v-if="form.type === 'ALIAS'" class="mt-2 p-3 bg-info/10 rounded-lg text-sm text-info">
-                <span class="font-semibold">{{ $t('dnsManagement.aliasHintTitle') }}</span>
-                {{ $t('dnsManagement.aliasHint') }}
-              </div>
-              <div v-if="form.type === 'CNAME' && (form.name === '@' || form.name === '')" class="mt-2 p-3 bg-success/10 rounded-lg text-sm text-success">
-                <span class="font-semibold">{{ $t('dnsManagement.cnameFlatteningTitle') }}</span>
-                {{ $t('dnsManagement.cnameFlatteningHint') }}
-              </div>
             </div>
           </div>
 
